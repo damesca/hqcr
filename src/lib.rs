@@ -4,6 +4,7 @@
 pub mod params;
 pub(crate) mod gf;
 pub mod poly;
+pub mod codes;
 
 pub use params::{HqcParams, Hqc128, Hqc192, Hqc256};
 pub use params::{SEED_BYTES, SALT_BYTES, SHARED_KEY_BYTES};

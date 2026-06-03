@@ -503,12 +503,12 @@ Bottom-up order based on module dependencies. Work through these one at a time.
 |:----:|:-----|:------:|:-----------|
 | 1 | `src/params.rs` | ✅ done | — |
 | 2 | `src/gf.rs` | ✅ done | — |
-| 3 | `src/poly/mod.rs` | ⬜ | params |
-| 4 | `src/poly/sampling.rs` | ⬜ | params, poly/mod |
-| 5 | `src/poly/mul.rs` | ⬜ | params, poly/mod |
-| 6 | `src/codes/reed_muller.rs` | ⬜ | params, poly/mod |
-| 7 | `src/codes/reed_solomon.rs` | ⬜ | gf, params |
-| 8 | `src/codes/mod.rs` | ⬜ | reed_muller, reed_solomon |
+| 3 | `src/poly/mod.rs` | ✅ done | params |
+| 4 | `src/poly/sampling.rs` | ✅ done | params, poly/mod |
+| 5 | `src/poly/mul.rs` | ✅ done | params, poly/mod |
+| 6 | `src/codes/reed_muller.rs` | ✅ done | params, poly/mod |
+| 7 | `src/codes/reed_solomon.rs` | ✅ done | gf, params |
+| 8 | `src/codes/mod.rs` | ✅ done | reed_muller, reed_solomon |
 | 9 | `src/parsing.rs` | ⬜ | params, poly/mod |
 | 10 | `src/hash.rs` | ⬜ | (sha3 crate only) |
 | 11 | `src/pke.rs` | ⬜ | all of above |
