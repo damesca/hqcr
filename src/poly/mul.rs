@@ -45,54 +45,80 @@
 use crate::params::HqcParams;
 use super::{Poly, MAX_N_WORDS};
 
-// ── Cyclic rotation helpers ───────────────────────────────────────────────────
+// ── Wide accumulator ──────────────────────────────────────────────────────────
+//
+// Both multiply modes accumulate shifted copies of one operand into a
+// double-width, NON-wrapping buffer, then reduce that buffer modulo X^N - 1 in
+// a single fold. This is the correct way to multiply in R:
+//
+//   * A product of two degree-(<N) polynomials has degree ≤ 2N-2, so it needs
+//     up to 2N bits — a buffer of 2·N_WORDS words always suffices (plus a small
+//     slack so the fold's `acc[word+1]` read never runs past the end).
+//   * Shifting WITHOUT a `% N_WORDS` wrap keeps every bit at its true integer
+//     position p+rot. (The previous implementation wrapped word indices modulo
+//     N_WORDS, which reduces modulo X^(N_WORDS·64)-1 ≠ X^N-1 and silently
+//     misplaced any bit with p+rot ≥ N_WORDS·64 by N_WORDS·64 - N positions.)
+//   * Reduction mod X^N-1 means X^N ≡ 1, so bit (t+N) folds onto bit t. Since
+//     all bits live in [0, 2N), each low bit t∈[0,N) receives exactly one fold
+//     contribution: result_bit[t] = acc_bit[t] XOR acc_bit[t+N].
+//
+// ── Optimization layers (unchanged plan) ─────────────────────────────────────
+// L0 [DONE] portable word-level baseline (this file). L1 Karatsuba and L2
+// pclmulqdq SIMD remain TODO; see the original notes above the module.
 
-/// XOR `src` rotated left by `rot` positions (in the ring of N bits) into `dst`.
-///
-/// "Rotated left by rot" means coefficient i of src contributes to coefficient
-/// (i + rot) mod N of dst — i.e. multiplying by X^rot in R.
-///
-/// Implementation: a cyclic rotation by `rot` bits decomposes into:
-///   1. A word shift by `word_shift = rot / 64`.
-///   2. A bit shift within a word: `bit_shift = rot % 64`.
-///
-/// We iterate over each source word, split its bits across two consecutive
-/// destination words (with the bit shift), and wrap around modulo N at the
-/// end.  The wrap is handled by a second pass that folds the `N_WORDS`-th
-/// word's carry into the appropriate low words.
-///
-/// After this function returns, `dst` may have non-zero bits above position
-/// N-1 (in the tail of dst[N_WORDS-1]).  The caller must call reduce() once
-/// after accumulating all rotations.
-#[inline(never)] // keep the inner loop a single call target for branch prediction
-fn xor_rotate_into<P: HqcParams>(dst: &mut [u64; MAX_N_WORDS], src: &[u64; MAX_N_WORDS], rot: usize) {
+/// Width of the non-wrapping product accumulator, in u64 words.
+/// 2·MAX_N_WORDS covers the ≤2N-bit product; +2 gives slack for the fold read.
+const WIDE_WORDS: usize = 2 * MAX_N_WORDS + 2;
+
+/// XOR `src` (an N-bit ring element in its low `N_WORDS` words) shifted left by
+/// `rot` bit positions into the wide accumulator `acc`. No modular wraparound:
+/// bits land at their true positions [rot, rot+N).
+#[inline(never)] // single call target for the inner loop's branch predictor
+fn shift_xor_wide<P: HqcParams>(acc: &mut [u64; WIDE_WORDS], src: &[u64; MAX_N_WORDS], rot: usize) {
     let nw = P::N_WORDS;
-    let word_shift = rot >> 6;      // rot / 64
-    let bit_shift  = rot & 63;      // rot % 64
+    let word_shift = rot >> 6; // rot / 64
+    let bit_shift = rot & 63; // rot % 64
 
     if bit_shift == 0 {
-        // Aligned rotation — just word-shift with wrap.
         for i in 0..nw {
-            let j = (i + word_shift) % nw;
-            dst[j] ^= src[i];
+            acc[i + word_shift] ^= src[i];
         }
     } else {
         let right_shift = 64 - bit_shift;
         for i in 0..nw {
-            let lo_idx = (i + word_shift) % nw;
-            let hi_idx = (i + word_shift + 1) % nw;
-            dst[lo_idx] ^= src[i] << bit_shift;
-            dst[hi_idx] ^= src[i] >> right_shift;
+            acc[i + word_shift] ^= src[i] << bit_shift;
+            acc[i + word_shift + 1] ^= src[i] >> right_shift;
         }
     }
-    // NOTE: This does not correctly implement cyclic reduction — the modular
-    // wrap from `% nw` on indices handles word-level wraparound but does NOT
-    // account for the fact that the ring has N bits, not N_WORDS*64 bits.
-    // The caller MUST call poly.reduce() after all rotations are accumulated.
-    //
-    // The issue: when bits from the end of the ring spill over into words[0]
-    // they arrive at bit positions that correspond to ring positions >= N.
-    // reduce() handles this by folding those overflow bits back.
+    // Max index touched: (nw-1) + word_shift + 1. With rot < N, word_shift ≤
+    // (N-1)/64 ≤ nw-1, so the index is ≤ 2·nw-1 < WIDE_WORDS. No bounds issue.
+}
+
+/// Fold the wide accumulator (bits in [0, 2N)) into a reduced `Poly<P>` modulo
+/// X^N - 1: `result_bit[t] = acc_bit[t] XOR acc_bit[t+N]` for t in [0, N).
+fn reduce_wide<P: HqcParams>(acc: &[u64; WIDE_WORDS]) -> Poly<P> {
+    let nw = P::N_WORDS;
+    let n = P::N;
+    let word = n / 64; // word holding bit N
+    let off = n % 64; // bit offset of N within that word
+
+    let mut out = Poly::<P>::zero();
+    for w in 0..nw {
+        // Extract the 64 bits of `acc` starting at bit position N + w·64,
+        // i.e. at word (word + w), bit offset `off`.
+        let folded = if off == 0 {
+            acc[word + w]
+        } else {
+            (acc[word + w] >> off) | (acc[word + w + 1] << (64 - off))
+        };
+        out.words[w] = acc[w] ^ folded;
+    }
+
+    // Clear any bits at/above N in the top word (the fold can leave junk there).
+    if off != 0 {
+        out.words[nw - 1] &= (1u64 << off) - 1;
+    }
+    out
 }
 
 // ── Mode A: sparse × dense (non-CT) ──────────────────────────────────────────
@@ -101,11 +127,12 @@ fn xor_rotate_into<P: HqcParams>(dst: &mut [u64; MAX_N_WORDS], src: &[u64; MAX_N
 ///
 /// Collects the set-bit positions of `sparse` via a regular branch (safe
 /// since sparse positions are public — drawn from a public XOF).
-/// For each set position `p`, XOR-rotates `dense` by `p` into the result.
+/// For each set position `p`, XOR-shifts `dense` by `p` into the wide
+/// accumulator, then reduces once.
 ///
 /// Callers: keygen and encrypt (h·y, h·r2, s·r2).
 pub fn mul_sparse_dense<P: HqcParams>(sparse: &Poly<P>, dense: &Poly<P>) -> Poly<P> {
-    let mut result = Poly::<P>::zero();
+    let mut acc = [0u64; WIDE_WORDS];
 
     for word_idx in 0..P::N_WORDS {
         let mut word = sparse.words[word_idx];
@@ -114,14 +141,13 @@ pub fn mul_sparse_dense<P: HqcParams>(sparse: &Poly<P>, dense: &Poly<P>) -> Poly
             let lsb = word.trailing_zeros() as usize;
             let pos = word_idx * 64 + lsb;
             if pos < P::N {
-                xor_rotate_into::<P>(&mut result.words, &dense.words, pos);
+                shift_xor_wide::<P>(&mut acc, &dense.words, pos);
             }
             word &= word - 1; // clear lowest set bit
         }
     }
 
-    result.reduce();
-    result
+    reduce_wide::<P>(&acc)
 }
 
 // ── Mode B: dense × dense, constant-time on `b` ──────────────────────────────
@@ -132,53 +158,40 @@ pub fn mul_sparse_dense<P: HqcParams>(sparse: &Poly<P>, dense: &Poly<P>) -> Poly
 /// data-dependent control flow on `b`.  Used in Decrypt where `b = y` is
 /// the secret key.
 ///
-/// For each bit position `pos` in `b` (0..N), extract the bit with a mask
-/// and conditionally XOR-rotate `a` into the accumulator.  The conditional
-/// is implemented as:
-///
-///   if (b.words[w] >> bit) & 1 == 1 { xor_rotate_into(a, pos) }
-///
-/// The branch on the extracted bit IS a secret-dependent branch — to fix it
-/// we replace it with a branchless conditional: multiply each word of the
-/// rotation by the bit mask (0 or 1), so the XOR either adds or adds zero.
+/// For each bit position `pos` in `b` (0..N), extract the bit as a 0/all-ones
+/// mask and XOR-shift `a` by `pos` into the wide accumulator, gated by the
+/// mask.  No branch on `b`'s bits, so timing is independent of the secret.
 ///
 /// Cost: O(N · N_WORDS) — roughly N/OMEGA times slower than Mode A.
 pub fn mul_dense_ct<P: HqcParams>(a: &Poly<P>, b: &Poly<P>) -> Poly<P> {
-    let mut result = Poly::<P>::zero();
+    let mut acc = [0u64; WIDE_WORDS];
     let nw = P::N_WORDS;
 
     for pos in 0..P::N {
         let word_idx = pos >> 6;
-        let bit_idx  = pos & 63;
+        let bit_idx = pos & 63;
         // Extract bit `pos` from `b` as a mask: 0x0000…0000 or 0xFFFF…FFFF.
-        // This is the CT heart: no branch, no multiply — just arithmetic.
+        // This is the CT heart: no branch on the secret bit — just arithmetic.
         let bit = (b.words[word_idx] >> bit_idx) & 1;
         let mask = bit.wrapping_neg(); // 0 → 0x0000…, 1 → 0xFFFF…
 
-        // XOR-rotate a by `pos` into result, gated by mask.
-        // We inline the rotation here (rather than call xor_rotate_into)
-        // so we can apply the mask directly without an extra allocation.
         let word_shift = pos >> 6;
-        let bit_shift  = pos & 63;
+        let bit_shift = pos & 63;
 
         if bit_shift == 0 {
             for i in 0..nw {
-                let j = (i + word_shift) % nw;
-                result.words[j] ^= a.words[i] & mask;
+                acc[i + word_shift] ^= a.words[i] & mask;
             }
         } else {
             let right_shift = 64 - bit_shift;
             for i in 0..nw {
-                let lo_idx = (i + word_shift) % nw;
-                let hi_idx = (i + word_shift + 1) % nw;
-                result.words[lo_idx] ^= (a.words[i] << bit_shift)  & mask;
-                result.words[hi_idx] ^= (a.words[i] >> right_shift) & mask;
+                acc[i + word_shift] ^= (a.words[i] << bit_shift) & mask;
+                acc[i + word_shift + 1] ^= (a.words[i] >> right_shift) & mask;
             }
         }
     }
 
-    result.reduce();
-    result
+    reduce_wide::<P>(&acc)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -239,6 +252,70 @@ mod tests {
         assert_eq!(r.get_bit(101), 1);
         assert_eq!(r.get_bit(0), 1, "X^(N-1) * X should wrap to bit 0");
         assert_eq!(r.hamming_weight(), 3);
+    }
+
+    // ── Absolute correctness vs naive cyclic convolution ─────────────────────
+    //
+    // This is the test the old code lacked: it compares against an independent
+    // O(weight²) reference, exercising LARGE rotations (positions near N) that
+    // trigger the wraparound path. Commutativity/distributivity could not catch
+    // the previous bug because they compared the buggy multiply against itself.
+
+    /// Naive product in R: bit (s+d) mod N toggled for each pair of set bits.
+    fn naive_mul<P: HqcParams>(a_pos: &[usize], b_pos: &[usize]) -> Poly<P> {
+        let mut acc = vec![0u8; P::N];
+        for &s in a_pos {
+            for &d in b_pos {
+                let k = (s + d) % P::N;
+                acc[k] ^= 1;
+            }
+        }
+        let mut p = Poly::<P>::zero();
+        for (i, &bit) in acc.iter().enumerate() {
+            if bit == 1 {
+                p.set_bit(i);
+            }
+        }
+        p
+    }
+
+    fn check_against_naive<P: HqcParams>(a_pos: &[usize], b_pos: &[usize]) {
+        let a = from_positions::<P>(a_pos);
+        let b = from_positions::<P>(b_pos);
+        let expected = naive_mul::<P>(a_pos, b_pos);
+        assert_eq!(mul_sparse_dense::<P>(&a, &b), expected, "Mode A vs naive");
+        assert_eq!(mul_dense_ct::<P>(&b, &a), expected, "Mode B vs naive");
+    }
+
+    #[test]
+    fn matches_naive_large_rotations_128() {
+        // Positions near N force pos + (N-1) ≫ N_WORDS·64 — the wraparound path.
+        check_against_naive::<Hqc128>(
+            &[0, 1, 12_345, Hqc128::N - 1, Hqc128::N - 2],
+            &[0, 7, 17_000, Hqc128::N - 1],
+        );
+    }
+
+    #[test]
+    fn matches_naive_large_rotations_192() {
+        check_against_naive::<Hqc192>(
+            &[0, 3, 30_000, Hqc192::N - 1],
+            &[5, 200, 35_000, Hqc192::N - 5],
+        );
+    }
+
+    #[test]
+    fn matches_naive_large_rotations_256() {
+        check_against_naive::<Hqc256>(
+            &[0, 9, 50_000, Hqc256::N - 1],
+            &[1, 64, 57_000, Hqc256::N - 3],
+        );
+    }
+
+    #[test]
+    fn matches_naive_single_high_bit_128() {
+        // X^(N-1) · X^(N-1) = X^(2N-2) = X^(N-2): a minimal wraparound check.
+        check_against_naive::<Hqc128>(&[Hqc128::N - 1], &[Hqc128::N - 1]);
     }
 
     // ── Commutativity ─────────────────────────────────────────────────────────

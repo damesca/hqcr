@@ -324,13 +324,16 @@ Byte-level serialization matching the spec wire format exactly (KAT vectors
 validate this). Responsibilities:
 - Bit-pack/unpack `Poly<P>` to/from `[u8; ceil(N/8)]`
 - Pack public key: `seed_h (32 B) || s (ceil(n/8) B)`
-- Pack ciphertext: `u (ceil(n/8) B) || v (ceil(n1·n2_base/8) B) || salt (16 B)`
+- Pack ciphertext: `u (ceil(n/8) B) || v (ceil(n1·n2/8) B) || salt (16 B)`
 - Compressed secret key: just `seed_KEM (32 B)`
 - Full secret key: `ekKEM || dkPKE || σ (32 B) || seedKEM (32 B)`
 
-Truncation: `v` covers exactly `n1 · (n2/multiplicity)` bits = `n1 · 128`
-bits before duplication expansion, embedded in `n` bits with `ℓ = n - n1·n2`
-trailing bits zeroed.
+Truncation: `v` covers exactly `n1 · n2` bits — where `n2` is the **duplicated**
+RM length (384 for HQC-128, 640 for HQC-192/256), i.e. the full concatenated
+RMRS codeword, *not* `n1 · 128`. This is embedded in the `n`-bit ring with the
+trailing `ℓ = n - n1·n2` bits zeroed; those ℓ ring bits are dropped on
+serialization. Cross-check: `CT_BYTES = ceil(n/8) + ceil(n1·n2/8) + 16` matches
+the spec's published `|cKEM|` (4433 / 8978 / 14421) and `params.rs`.
 
 ### `hash.rs`
 
@@ -509,9 +512,9 @@ Bottom-up order based on module dependencies. Work through these one at a time.
 | 6 | `src/codes/reed_muller.rs` | ✅ done | params, poly/mod |
 | 7 | `src/codes/reed_solomon.rs` | ✅ done | gf, params |
 | 8 | `src/codes/mod.rs` | ✅ done | reed_muller, reed_solomon |
-| 9 | `src/parsing.rs` | ⬜ | params, poly/mod |
-| 10 | `src/hash.rs` | ⬜ | (sha3 crate only) |
-| 11 | `src/pke.rs` | ⬜ | all of above |
+| 9 | `src/parsing.rs` | ✅ done | params, poly/mod |
+| 10 | `src/hash.rs` | ✅ done | (sha3 crate only) |
+| 11 | `src/pke.rs` | ✅ done | all of above |
 | 12 | `src/kem.rs` | ⬜ | pke, hash |
 | 13 | `src/lib.rs` | ⬜ | everything |
 
