@@ -520,6 +520,113 @@ Bottom-up order based on module dependencies. Work through these one at a time.
 
 ---
 
+## Remaining work — roadmap to a KAT-verified release
+
+The 13-step bottom-up build is functionally complete: all modules compile, and
+`PKE` / `KEM` round-trip (including implicit rejection) across all three
+parameter sets. What is left is the gap between *"works"* and the project's
+stated bar — **correct, constant-time, and verified byte-for-byte against the
+official KAT vectors**. Work these in order; each step is gated by the one
+before it.
+
+> Reminder: never run `cargo` here. Provide the command for the user to run.
+
+### Step 14 — `mod` (Barrett-reduction) sampler in `poly/sampling.rs`
+
+**This is the critical path. Nothing downstream can match KAT until it lands.**
+
+The 2025 spec uses *two* different position samplers, and we currently use the
+rejection sampler for both:
+
+- **`x`, `y`** (secret key) — rejection sampling. ✅ already correct.
+- **`r1`, `r2`, `e`** (ephemeral) — a **Barrett-reduction (`mod`) sampler**: draw
+  a 32-bit little-endian word per index, reduce it into `[0, n)` via the
+  spec's fixed-point multiply-shift (`pos = (rand * n) >> 32`, see spec
+  §4 / reference `vect_set_random_fixed_weight`), then resolve duplicate
+  positions with the spec's support-array swap procedure. ❌ not implemented.
+
+Tasks:
+1. Add `sample_fixed_weight_mod<P>(xof, weight) -> Poly<P>` implementing the
+   Barrett sampler + the exact duplicate-handling of the reference.
+2. Keep the existing rejection sampler for `x`, `y`.
+3. Repoint `pke::encrypt` to call the `mod` sampler for `r2, e, r1` (remove the
+   `TODO(sampler)` notes in `pke.rs` and `hash.rs` once done).
+4. **CT requirement** (per the table below): reduction and dedup must not branch
+   on sampled values. Constant-time comparisons only.
+
+Unit tests: exact-weight check; determinism for a fixed seed; a hand-computed
+vector from a known XOF stream (lets you catch an endianness/shift mistake
+before the full KAT run).
+
+### Step 15 — KAT harness in `tests/kat.rs` (currently a 6-line stub)
+
+The only correctness oracle that ultimately matters.
+
+Tasks:
+1. Add the `kat` feature to `Cargo.toml` (`cargo test --features kat`, per the
+   Testing strategy section).
+2. Vendor the official `.rsp` vectors (or a trimmed subset) from pqc-hqc.org for
+   HQC-128/192/256.
+3. Wire the NIST DRBG (AES-256-CTR `randombytes`) that the `.rsp` seeds assume,
+   then feed those seeds through `kem::keygen` / `encaps` / `decaps` and assert
+   `pk`, `sk`, `ct`, `ss` match **byte-for-byte**.
+4. Expect mismatches first to surface in Step 14; this harness is how you prove
+   it is fixed.
+
+This step is the definition of done for correctness. If KAT passes for all
+three sets, the implementation is correct.
+
+### Step 16 — `lib.rs` API polish (finish Step 13)
+
+Promote the crate root from "wired" to "public-facing":
+1. Crate-level `//!` docs with a minimal keygen → encaps → decaps example.
+2. Flat re-exports of the KEM entry points (e.g. `hqc::keygen`, `hqc::encaps`,
+   `hqc::decaps`) and the `SharedKey` type, so callers need not reach into
+   `hqc::kem::`.
+3. Decide and document the public surface: keep low-level `pke`/`poly`/`codes`
+   `pub` for testing, or gate them behind a `pub(crate)` / `#[doc(hidden)]`
+   boundary and expose only the KEM.
+
+### Step 17 — `poly/mul.rs` optimization layers (performance only)
+
+Correctness is unaffected; do this after KAT is green so the L0 baseline
+remains the reference oracle while optimizing.
+1. **L1 Karatsuba** for Mode B dense×dense (~2× over L0).
+2. **L2 SIMD** `pclmulqdq` via `std::arch::x86_64`, gated behind
+   `#[cfg(target_feature = "pclmul")]` with the safe L0 fallback always present.
+   This is the only place `unsafe` is permitted.
+
+### Step 18 — `benches/bench.rs` (currently a 4-line stub)
+
+Criterion benchmarks for `poly_mul` (both modes), `keygen`, `encaps`, `decaps`
+across all three parameter sets. Use to verify Step 17 actually pays off and to
+catch performance regressions.
+
+### Step 19 — Release hardening (cross-cutting, last)
+
+1. **Constant-time audit:** walk every row of the Constant-time requirements
+   table against the final code; confirm no `==`/early-exit on secret-derived
+   data (especially the new `mod` sampler and `kem::decaps`).
+2. **Zeroize audit:** confirm every secret listed in the Zeroize discipline
+   section is `ZeroizeOnDrop` or `Zeroizing`-wrapped end to end.
+3. Run `cargo clippy` / `cargo fmt`; resolve warnings. Consider `cargo miri` on
+   the unit tests for UB in the SIMD path.
+4. Fill in crate metadata (README, keywords, categories) for a `crates.io`
+   publish if desired.
+
+### Status summary
+
+| Step | Item | Status |
+|:----:|:-----|:------:|
+| 14 | `mod` (Barrett) sampler for r1/r2/e | ⬜ blocks KAT |
+| 15 | KAT harness + vectors | ⬜ depends on 14 |
+| 16 | `lib.rs` API polish | 🟡 partial |
+| 17 | Karatsuba / SIMD `poly_mul` | ⬜ perf only |
+| 18 | criterion benches | ⬜ |
+| 19 | CT + zeroize audit, lint, metadata | ⬜ |
+
+---
+
 ## Reference implementations
 
 - **Official C reference + AVX2:** https://pqc-hqc.org (source tarball)  
