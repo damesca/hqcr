@@ -17,14 +17,6 @@
 //
 // Note H and the XOF share the byte 0x01 but use different Keccak instances
 // (SHA3-256 vs SHAKE256), so there is no collision between them.
-//
-// ── Still pending for full KAT (NOT in this module) ───────────────────────────
-// The domain separators are now correct. The remaining KAT-affecting gap is in
-// poly/sampling.rs: the spec uses REJECTION sampling for x, y and a Barrett-
-// reduction ("mod") sampler for r1, r2, e. sampling.rs currently exposes only
-// the rejection sampler. Weights are correct everywhere, but the r1/r2/e
-// position distribution (hence KAT bytes) will differ until a `mod` sampler is
-// added. See the TODO(sampler) note in pke.rs.
 
 use sha3::digest::{ExtendableOutput, Update, XofReader};
 use sha3::{Digest, Sha3_256, Sha3_512, Shake256};

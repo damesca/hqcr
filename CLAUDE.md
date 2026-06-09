@@ -531,32 +531,42 @@ before it.
 
 > Reminder: never run `cargo` here. Provide the command for the user to run.
 
-### Step 14 — `mod` (Barrett-reduction) sampler in `poly/sampling.rs`
+### Step 14 — `mod` (Barrett-reduction) sampler in `poly/sampling.rs` ✅ done
 
-**This is the critical path. Nothing downstream can match KAT until it lands.**
+**This was the critical path. Nothing downstream can match KAT until it lands.**
 
-The 2025 spec uses *two* different position samplers, and we currently use the
-rejection sampler for both:
+The 2025 spec uses *two* different position samplers:
 
-- **`x`, `y`** (secret key) — rejection sampling. ✅ already correct.
+- **`x`, `y`** (secret key) — rejection sampling. ✅ unchanged.
 - **`r1`, `r2`, `e`** (ephemeral) — a **Barrett-reduction (`mod`) sampler**: draw
-  a 32-bit little-endian word per index, reduce it into `[0, n)` via the
-  spec's fixed-point multiply-shift (`pos = (rand * n) >> 32`, see spec
-  §4 / reference `vect_set_random_fixed_weight`), then resolve duplicate
-  positions with the spec's support-array swap procedure. ❌ not implemented.
+  a 32-bit little-endian word per index, map it into `[i, n)` via the spec's
+  fixed-point multiply-shift (`support[i] = i + ((rand · (n − i)) >> 32)`, see
+  reference `vect_set_random_fixed_weight`), then resolve duplicates with the
+  backward support-array swap procedure. ✅ implemented as
+  `sample_fixed_weight_mod`.
 
-Tasks:
-1. Add `sample_fixed_weight_mod<P>(xof, weight) -> Poly<P>` implementing the
-   Barrett sampler + the exact duplicate-handling of the reference.
-2. Keep the existing rejection sampler for `x`, `y`.
-3. Repoint `pke::encrypt` to call the `mod` sampler for `r2, e, r1` (remove the
-   `TODO(sampler)` notes in `pke.rs` and `hash.rs` once done).
-4. **CT requirement** (per the table below): reduction and dedup must not branch
-   on sampled values. Constant-time comparisons only.
+What was done:
+1. Added `sample_fixed_weight_mod<P>(xof, weight) -> Poly<P>` in
+   `poly/sampling.rs`: Barrett reduction + backward duplicate resolution +
+   constant-time bit-setting (scan every word, OR in a masked bit).
+2. Kept the existing rejection sampler for `x`, `y`.
+3. Repointed `pke::encrypt` to call the `mod` sampler for `r2, e, r1`; removed
+   the `TODO(sampler)` notes in `pke.rs` and `hash.rs`.
+4. CT: reduction, dedup (`ConstantTimeEq`), and bit-setting
+   (`ConditionallySelectable`) all run over fixed public-length loops with no
+   data-dependent branch or store address.
 
-Unit tests: exact-weight check; determinism for a fixed seed; a hand-computed
-vector from a known XOF stream (lets you catch an endianness/shift mistake
-before the full KAT run).
+Unit tests added: exact-weight (implies distinctness) for all three sets;
+determinism; differs-from-rejection; and three hand-computed vectors pinning the
+formula and byte order — all-zero rand ⇒ positions `0..weight`, all-ones rand ⇒
+`{0..weight−2, N−1}` (exercises dedup), and a little-endian probe
+(`0x80000000` ⇒ position `⌊N/2⌋ = 8834`).
+
+> ⚠️ **Still unverified against the real oracle.** These tests pin the *intended*
+> algorithm and are internally consistent, but the Barrett constant details and
+> the x/y-vs-r1/r2/e split are only *proven* correct once Step 15 (KAT) passes.
+> The KAT run is the authority; if it fails, revisit the byte order, the
+> `(n − i)` vs `n` reduction, and whether `x, y` also need the `mod` sampler.
 
 ### Step 15 — KAT harness in `tests/kat.rs` (currently a 6-line stub)
 
@@ -618,7 +628,7 @@ catch performance regressions.
 
 | Step | Item | Status |
 |:----:|:-----|:------:|
-| 14 | `mod` (Barrett) sampler for r1/r2/e | ⬜ blocks KAT |
+| 14 | `mod` (Barrett) sampler for r1/r2/e | ✅ done (pending KAT proof) |
 | 15 | KAT harness + vectors | ⬜ depends on 14 |
 | 16 | `lib.rs` API polish | 🟡 partial |
 | 17 | Karatsuba / SIMD `poly_mul` | ⬜ perf only |

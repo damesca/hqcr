@@ -27,7 +27,7 @@ pub trait HqcParams: sealed::Sealed {
     const N1: usize;
 
     /// Duplicated RM code length (internal code). Named n2 in the spec.
-    /// Equals N1 * 128 * MULTIPLICITY / N1 = 128 * MULTIPLICITY.
+    /// Equals 128 * MULTIPLICITY.
     const N2: usize;
 
     /// Message length in bytes.
@@ -124,6 +124,8 @@ impl HqcParams for Hqc256 {
     const CT_BYTES: usize = (57_637 + 7) / 8 + (90 * 640 + 7) / 8 + 16; // 14_421
     const SK_BYTES: usize = 32;
 }
+
+// Reminder: ceil(a/b) = (a + b - a) / b
 
 // ── Compile-time sanity checks ────────────────────────────────────────────────
 

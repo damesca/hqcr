@@ -34,13 +34,11 @@
 // separators are fully wired (see hash.rs); the only remaining KAT gap is the
 // sampler below.
 //
-// ── Deferred for KAT compliance ───────────────────────────────────────────────
-//   • TODO(sampler): the spec samples x, y with REJECTION sampling and r1, r2,
-//     e with a Barrett-reduction ("mod") sampler. sampling.rs currently exposes
-//     only the rejection sampler, which we use for all of them here. The
-//     weights are correct (exactly ω / ωr), but the position *distribution*
-//     (hence the KAT bytes) for r1, r2, e will not match until a `mod` sampler
-//     is added. Swap the three Encrypt samples to it then.
+// ── Sampler split (spec 2025) ─────────────────────────────────────────────────
+// The two fixed-weight roles use different samplers, matching the reference:
+//   • x, y (long-term secret) ← sample_fixed_weight       (rejection sampling)
+//   • r2, e, r1 (ephemeral)   ← sample_fixed_weight_mod    (Barrett "mod" sampler)
+// See poly/sampling.rs for why, and for the exact Barrett procedure.
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -49,7 +47,7 @@ use crate::hash;
 use crate::params::{HqcParams, SEED_BYTES};
 use crate::parsing;
 use crate::poly::mul::{mul_dense_ct, mul_sparse_dense};
-use crate::poly::sampling::{sample_fixed_weight, sample_uniform};
+use crate::poly::sampling::{sample_fixed_weight, sample_fixed_weight_mod, sample_uniform};
 use crate::poly::Poly;
 
 // ── Key types ───────────────────────────────────────────────────────────────
@@ -131,12 +129,13 @@ pub fn encrypt<P: HqcParams>(ek: &EncryptionKey<P>, m: &[u8], theta: &[u8]) -> (
     let mut xof_ek = hash::xof(&ek.seed_ek[..]);
     let h = sample_uniform::<P>(&mut xof_ek);
 
-    // (r2, e, r1) ← sample_fixed_weight ×3 from XOF(θ), in this exact order.
-    // ωe = ωr, so all three use P::OMEGA_R.
+    // (r2, e, r1) ← sample_fixed_weight_mod ×3 from XOF(θ), in this exact order.
+    // ωe = ωr, so all three use P::OMEGA_R. Ephemeral vectors use the Barrett
+    // ("mod") sampler, not the rejection sampler used for the secret key.
     let mut xof_th = hash::xof(theta);
-    let r2 = sample_fixed_weight::<P>(&mut xof_th, P::OMEGA_R);
-    let e = sample_fixed_weight::<P>(&mut xof_th, P::OMEGA_R);
-    let r1 = sample_fixed_weight::<P>(&mut xof_th, P::OMEGA_R);
+    let r2 = sample_fixed_weight_mod::<P>(&mut xof_th, P::OMEGA_R);
+    let e = sample_fixed_weight_mod::<P>(&mut xof_th, P::OMEGA_R);
+    let r1 = sample_fixed_weight_mod::<P>(&mut xof_th, P::OMEGA_R);
 
     // u = r1 + h·r2 (r2 sparse ⇒ Mode A).
     let hr2 = mul_sparse_dense::<P>(&r2, &h);
