@@ -22,10 +22,20 @@ pub(crate) const MAX_N_WORDS: usize = 901;
 ///
 /// Layout: `words[i/64]` bit `i%64` holds the coefficient of X^i.
 /// Bits from index `P::N` up to `MAX_N_WORDS*64 - 1` are always zero.
-#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Poly<P: HqcParams> {
     pub(crate) words: [u64; MAX_N_WORDS],
     _p: PhantomData<P>,
+}
+
+// Manual Clone: the derived impl would add a spurious `where P: Clone` bound,
+// but `P` is only a phantom marker (zero-sized), so cloning never touches it.
+// Without this, generic code (e.g. kem.rs) could not clone a Poly under the
+// bare `P: HqcParams` bound.
+impl<P: HqcParams> Clone for Poly<P> {
+    fn clone(&self) -> Self {
+        Self { words: self.words, _p: PhantomData }
+    }
 }
 
 impl<P: HqcParams> Poly<P> {

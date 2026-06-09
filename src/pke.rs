@@ -56,10 +56,20 @@ use crate::poly::Poly;
 
 /// HQC-PKE encryption key: the public seed for `h` plus the syndrome `s`.
 /// Serializes (via `parsing`) to `seed_ek ‖ s`, identical to ekKEM.
-#[derive(Clone)]
 pub struct EncryptionKey<P: HqcParams> {
     pub seed_ek: [u8; SEED_BYTES],
     pub s: Poly<P>,
+}
+
+// Manual Clone: the derived impl would add a spurious `where P: Clone` bound.
+// `P` is a zero-sized marker, so cloning only copies `seed_ek` and `s`.
+impl<P: HqcParams> Clone for EncryptionKey<P> {
+    fn clone(&self) -> Self {
+        Self {
+            seed_ek: self.seed_ek,
+            s: self.s.clone(),
+        }
+    }
 }
 
 /// HQC-PKE decryption key: just the 32-byte secret seed from which `y` is

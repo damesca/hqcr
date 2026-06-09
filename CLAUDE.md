@@ -515,8 +515,8 @@ Bottom-up order based on module dependencies. Work through these one at a time.
 | 9 | `src/parsing.rs` | ✅ done | params, poly/mod |
 | 10 | `src/hash.rs` | ✅ done | (sha3 crate only) |
 | 11 | `src/pke.rs` | ✅ done | all of above |
-| 12 | `src/kem.rs` | ⬜ | pke, hash |
-| 13 | `src/lib.rs` | ⬜ | everything |
+| 12 | `src/kem.rs` | ✅ done | pke, hash |
+| 13 | `src/lib.rs` | 🟡 module + re-exports wired | everything |
 
 ---
 
