@@ -1,31 +1,34 @@
 // Sampling functions for polynomials in R = F2[X]/(X^n - 1).
 //
-// Three samplers:
-//   sample_fixed_weight     — rejection sampling, exactly `weight` distinct
-//                             positions. Used for the long-term secret (x, y).
-//   sample_fixed_weight_mod — Barrett-reduction ("mod") sampler, exactly
-//                             `weight` distinct positions. Used for the
-//                             ephemeral vectors (r1, r2, e) in PKE.Encrypt.
+// Two fixed-weight samplers + one uniform, matching the 2025 reference
+// (reference_impl/src/vector.c) exactly. The reference deliberately uses a
+// DIFFERENT fixed-weight routine for the secret vs the ephemeral vectors, and
+// hqc.c picks them per role — using the wrong one is a KAT mismatch:
+//
+//   sample_fixed_weight     — reference `vect_sample_fixed_weight1`
+//                             (`vect_generate_random_support1`). Used for the
+//                             SECRET x, y in keygen. Draws 24-bit BIG-ENDIAN
+//                             values in 3·weight-byte batches, rejects any value
+//                             ≥ ⌊2^24/N⌋·N (redraw), reduces survivors mod N
+//                             (Barrett), and redraws on a duplicate position.
+//   sample_fixed_weight_mod — reference `vect_sample_fixed_weight2`
+//                             (`vect_generate_random_support2`). Used for the
+//                             EPHEMERAL r1, r2, e in encrypt. Reads 4·weight
+//                             bytes as little-endian u32 and sets
+//                             support[i] = i + ((rand·(N−i))>>32), then a
+//                             backward dedup; no rejection.
 //   sample_uniform          — fills all N bits uniformly (public key h).
 //
-// Why two fixed-weight samplers? The 2025 spec deliberately draws the two roles
-// differently (matches the reference `vect_set_random_fixed_weight` family):
-//   • x, y are the long-term secret, sampled once at keygen — rejection
-//     sampling gives a perfectly uniform position distribution.
-//   • r1, r2, e are ephemeral, resampled on every Encrypt (and again on every
-//     Decaps re-encryption), so they sit on the hot path — the Barrett sampler
-//     draws a fixed 4·weight bytes with no rejection loop. Its O(N/2^32) bias
-//     is cryptographically negligible for a value that is never reused.
-// The two consume the XOF stream differently and produce different positions
-// from the same seed, so they are NOT interchangeable — using the wrong one is
-// a KAT mismatch even though both yield a valid weight-`ω` vector.
+// History: an earlier revision used a single bespoke rejection sampler (u16) for
+// x/y and the mod sampler for everything; reading the reference proved x/y need
+// sampler #1 specifically. See KAT.md "Sampler fix".
 //
 // Constant-time contract:
-//   sample_fixed_weight must not branch on the *value* of sampled positions,
-//   only on the public condition `pos < n`. The deduplication check (is this
-//   position already in the set?) uses subtle::ConstantTimeEq so timing does
-//   not reveal which positions were accepted or rejected.
-//   sample_fixed_weight_mod is fully branchless: the reduction, the duplicate
+//   sample_fixed_weight is REJECTION-based and therefore NOT constant time — its
+//   running time and XOF consumption depend on the drawn values. This matches
+//   the reference, which accepts variable timing for the once-per-keygen secret
+//   sampling.
+//   sample_fixed_weight_mod is branchless: the reduction, the duplicate
 //   resolution, and the final bit-setting all run over fixed-length loops with
 //   constant-time selects, leaking nothing about the sampled positions.
 
@@ -37,20 +40,19 @@ use super::Poly;
 
 // ── Internal XOF helpers ──────────────────────────────────────────────────────
 
-/// Read exactly 2 bytes from the XOF and interpret them as a little-endian u16.
-#[inline(always)]
-fn read_u16(xof: &mut impl XofReader) -> u16 {
-    let mut buf = [0u8; 2];
-    xof.read(&mut buf);
-    u16::from_le_bytes(buf)
-}
-
-/// Read exactly 4 bytes from the XOF and interpret them as a little-endian u32.
-#[inline(always)]
-fn read_u32(xof: &mut impl XofReader) -> u32 {
-    let mut buf = [0u8; 4];
-    xof.read(&mut buf);
-    u32::from_le_bytes(buf)
+/// Read `out.len()` bytes from the XOF, then consume the trailing alignment
+/// padding so the XOF advances by `ceil(len/8)·8` bytes — exactly matching the
+/// reference `xof_get_bytes` (reference_impl/src/symmetric.c), which squeezes in
+/// 8-byte (`sizeof(uint64_t)`) units and discards the unused tail of the final
+/// unit. This inter-call discard is what keeps successive samples drawn from the
+/// SAME XOF (e.g. x after y, or e/r1 after r2) byte-aligned with the reference.
+fn xof_get_bytes(xof: &mut impl XofReader, out: &mut [u8]) {
+    xof.read(out);
+    let pad = (8 - out.len() % 8) % 8;
+    if pad != 0 {
+        let mut discard = [0u8; 8];
+        xof.read(&mut discard[..pad]);
+    }
 }
 
 /// Read exactly 8 bytes from the XOF and interpret them as a little-endian u64.
@@ -61,27 +63,28 @@ fn read_u64(xof: &mut impl XofReader) -> u64 {
     u64::from_le_bytes(buf)
 }
 
-// ── Fixed-weight sampler ──────────────────────────────────────────────────────
+// ── Fixed-weight sampler #1 (secret x, y) ─────────────────────────────────────
 
-/// Sample a polynomial with exactly `weight` coefficients equal to 1, with the
-/// set positions drawn uniformly at random from [0, n).
+/// Sample a polynomial with exactly `weight` coefficients equal to 1, using the
+/// reference `vect_sample_fixed_weight1` / `vect_generate_random_support1`
+/// (reference_impl/src/vector.c). This is the SECRET-key sampler, for x and y.
 ///
-/// Algorithm: rejection sampling over u16 values read from `xof`.
-///   - Read a u16.  If it is >= n, discard (public rejection — does not leak).
-///   - Otherwise check whether it duplicates any already-accepted position.
-///     The duplicate check is done in constant time via ConstantTimeEq so that
-///     the timing does not reveal the accepted positions.
-///   - Accept iff the position is in-range AND not a duplicate.
-///   - Repeat until exactly `weight` positions are collected.
+/// Algorithm:
+///   - Draw 24-bit BIG-ENDIAN values, refilling `xof` in `3·weight`-byte
+///     batches (reading full batches reproduces the reference's byte
+///     consumption — including the discard of a batch's unused tail — which is
+///     what keeps a second call on the same XOF, x after y, byte-aligned).
+///   - Reject any draw ≥ the rejection threshold `⌊2^24/N⌋·N` (redraw): this is
+///     what makes the surviving values reduce *uniformly* mod N.
+///   - Reduce the survivor mod N (the reference's constant-time `barrett_reduce`;
+///     for x < 2^24 this equals `x % N`, which we use directly).
+///   - Redraw on a duplicate position (do not advance).
 ///
-/// The `positions` accumulation buffer lives on the stack as a fixed-size
-/// array of u32 values (max weight across all parameter sets is 149 for
-/// HQC-256, but we size to 256 for safety).  We store u32 (not u16) so we
-/// can accommodate n up to 57 637 without truncation.
-///
-/// CT contract: the only data-dependent branch is `pos < n`, which depends
-/// only on the public parameter n.  All comparisons against already-accepted
-/// positions use subtle::ConstantTimeEq and ConditionallySelectable.
+/// NOT constant time: like the reference, the number of rejections / duplicate
+/// redraws — and hence the running time and XOF byte consumption — depends on
+/// the drawn values. The reference accepts this for the once-per-keygen secret
+/// sampling. (Reproducing the reference's exact rejection behaviour is required
+/// for KAT correctness, so this timing property is inherent, not a choice.)
 pub fn sample_fixed_weight<P: HqcParams>(
     xof: &mut impl XofReader,
     weight: usize,
@@ -89,60 +92,45 @@ pub fn sample_fixed_weight<P: HqcParams>(
     debug_assert!(weight <= 256, "weight {weight} exceeds internal buffer size");
     debug_assert!(weight <= P::N, "weight {weight} > N={}", P::N);
 
-    // Accepted positions, stored as u32.  We use a fixed buffer; only the
-    // first `filled` entries are valid, but we always operate on the full
-    // buffer in CT mode so timing is uniform.
+    let n = P::N as u32;
+    // Rejection threshold t = ⌊2^24 / N⌋ · N (UTILS_REJECTION_THRESHOLD).
+    let threshold = ((1u32 << 24) / n) * n;
+
+    // Random bytes are consumed in batches of `3·weight`, matching the
+    // reference's `rand_bytes[3·weight]` refill granularity.
+    let batch = 3 * weight;
+    let mut buf = [0u8; 3 * 256];
+    let mut j = batch; // == batch forces an initial refill on first use
+
     let mut positions = [0u32; 256];
     let mut filled: usize = 0;
 
     while filled < weight {
-        // Draw a 16-bit candidate.  n <= 57637 < 65536 so u16 covers the range.
-        let raw = read_u16(xof) as u32;
+        // Draw a 24-bit big-endian candidate, rejecting values ≥ threshold.
+        let pos = loop {
+            if j == batch {
+                // One reference `xof_get_bytes(3·weight)` call per batch: reads
+                // `batch` bytes and discards the 8-byte-alignment tail.
+                xof_get_bytes(xof, &mut buf[..batch]);
+                j = 0;
+            }
+            let cand = ((buf[j] as u32) << 16) | ((buf[j + 1] as u32) << 8) | (buf[j + 2] as u32);
+            j += 3;
+            if cand < threshold {
+                break cand % n; // == barrett_reduce(cand)
+            }
+        };
 
-        // Public rejection: discard if out of range.  This branch is on a
-        // public parameter (n), not on secret data.
-        if raw >= P::N as u32 {
-            continue;
+        positions[filled] = pos;
+
+        // Redraw on duplicate: scan the accepted prefix; only advance if distinct.
+        let mut dup = false;
+        for k in 0..filled {
+            if positions[k] == pos {
+                dup = true;
+            }
         }
-
-        // Duplicate check — must be constant time.
-        //
-        // We scan all `weight` slots of `positions` (not just `filled`).
-        // Slots above `filled` contain 0; we bias the comparison to treat
-        // slot index >= filled as "no match" by also checking the slot index.
-        //
-        // Strategy:
-        //   For each slot j in 0..weight:
-        //     is_used   = (j < filled) as Choice          [public index < public count]
-        //     is_match  = positions[j].ct_eq(&raw)        [CT value comparison]
-        //     duplicate |= is_used & is_match
-        //
-        // `j < filled` is a comparison of two public loop counters — no secret
-        // data involved — so a regular branch is fine here.
-        let mut duplicate = Choice::from(0u8);
-        for j in 0..weight {
-            let is_used = Choice::from((j < filled) as u8);
-            let is_match = positions[j].ct_eq(&raw);
-            duplicate |= is_used & is_match;
-        }
-
-        // Accept this position iff it is not a duplicate.
-        // We write to positions[filled] unconditionally (CT), then increment
-        // `filled` only if accepted.  The unconditional write is safe because
-        // `filled` < weight <= 256.
-        //
-        // ConditionallySelectable: positions[filled] = if accepted { raw } else { positions[filled] }
-        let accepted = !duplicate;
-        positions[filled] = u32::conditional_select(&positions[filled], &raw, accepted);
-        // filled += accepted as usize: branch on `accepted`, which is derived
-        // from the duplicate check — is this public? No: `filled` reveals how
-        // many distinct positions have been found, which depends on the XOF
-        // output. HOWEVER, `filled` is not secret in the threat model: the
-        // loop iteration count is observable via timing anyway (we loop until
-        // filled == weight, which is public). The spec does not require hiding
-        // the number of rejections, only the position *values*. So a branch on
-        // `accepted` for the counter is acceptable.
-        if accepted.into() {
+        if !dup {
             filled += 1;
         }
     }
@@ -189,9 +177,17 @@ pub fn sample_fixed_weight_mod<P: HqcParams>(
 
     let mut support = [0u32; 256];
 
+    // Draw all 4·weight random bytes in one reference `xof_get_bytes(4·weight)`
+    // call (8-byte-aligned consumption with tail discard), then read them as
+    // little-endian u32 — matching `vect_generate_random_support2`.
+    let nbytes = 4 * weight;
+    let mut buf = [0u8; 4 * 256];
+    xof_get_bytes(xof, &mut buf[..nbytes]);
+
     // Step 1 — draw and Barrett-reduce: support[i] = i + ((rand_i·(N−i)) >> 32).
     for i in 0..weight {
-        let rand = read_u32(xof) as u64;
+        let rand =
+            u32::from_le_bytes([buf[4 * i], buf[4 * i + 1], buf[4 * i + 2], buf[4 * i + 3]]) as u64;
         let n_minus_i = (P::N - i) as u64;
         support[i] = (i as u64 + ((rand * n_minus_i) >> 32)) as u32;
     }

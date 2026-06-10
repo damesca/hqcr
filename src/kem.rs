@@ -90,6 +90,36 @@ impl<P: HqcParams> DecapsulationKey<P> {
         let (_, dk) = keygen_from_seed::<P>(&seed);
         Some(dk)
     }
+
+    /// **Debug / KAT only** (gated behind the `kat` feature). Serializes the
+    /// decapsulation key in the HQC *reference* secret-key wire format used by
+    /// the official NIST KAT `.rsp` files, rather than the compressed 32-byte
+    /// `seed_KEM` returned by [`to_bytes`](Self::to_bytes):
+    ///
+    /// ```text
+    /// sk = ek (PK_BYTES) ‖ seed_dk (32) ‖ seed_ek (32) ‖ σ (K)
+    /// ```
+    ///
+    /// where `seed_dk ‖ seed_ek` is the 64-byte output of the I-split (so the
+    /// suffix is `64 + K` bytes, matching the upstream `|sk|` of 2321 / 4602 /
+    /// 7333). σ is truncated to the reference's `K` bytes: this crate squeezes a
+    /// 32-byte σ from the XOF, but the reference squeezes only `K` (`seed_pke`,
+    /// and therefore `pk`/`seed_dk`/`seed_ek`, are the first 32 bytes and so are
+    /// unaffected by that difference).
+    ///
+    /// Exposed purely so the KAT harness can emit a reference-shaped `sk` for
+    /// byte-for-byte comparison against pqc-hqc.org. NOT part of the production
+    /// API and not constant-time-audited for this layout.
+    #[cfg(feature = "kat")]
+    pub fn expanded_secret_key_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(P::PK_BYTES + 2 * SEED_BYTES + P::K);
+        out.extend_from_slice(&self.ek.to_bytes()); // ek = seed_ek ‖ s
+        out.extend_from_slice(&self.dk_pke.seed_dk); // 32 B
+        out.extend_from_slice(&self.ek.seed_ek); // 32 B
+        out.extend_from_slice(&self.sigma[..P::K]); // K B (reference σ length)
+        debug_assert_eq!(out.len(), P::PK_BYTES + 2 * SEED_BYTES + P::K);
+        out
+    }
 }
 
 // ── Keygen ──────────────────────────────────────────────────────────────────

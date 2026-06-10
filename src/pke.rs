@@ -3,20 +3,20 @@
 // Three operations (spec §4 / hqc_notes.md §4):
 //
 //   Keygen(seed_pke) -> (ek, dk)
-//       (seed_dk, seed_ek) = I(seed_pke)           // SHA3-512 split, see note
-//       (y, x) = sample_fixed_weight(XOF(seed_dk)) // sparse, weight ω
-//       h      = sample_uniform(XOF(seed_ek))      // dense, public
+//       (seed_dk, seed_ek) = I(seed_pke)               // SHA3-512 split, see note
+//       (y, x) = sample_fixed_weight(XOF(seed_dk))     // sparse, weight ω (ref #1)
+//       h      = sample_uniform(XOF(seed_ek))          // dense, public
 //       s      = x + h·y
 //       ek = (seed_ek, s)    dk = seed_dk
 //
 //   Encrypt(ek, m, θ) -> (u, v)
-//       h           = sample_uniform(XOF(seed_ek)) // recomputed from ek
-//       (r2, e, r1) = sample_fixed_weight(XOF(θ))  // sparse, weight ωr/ωe
+//       h           = sample_uniform(XOF(seed_ek))     // recomputed from ek
+//       (r2, e, r1) = sample_fixed_weight_mod(XOF(θ))  // sparse, weight ωr/ωe (ref #2)
 //       u = r1 + h·r2
-//       v = C.Encode(m) + s·r2 + e                 // truncated to n1·n2 bits
+//       v = C.Encode(m) + s·r2 + e                     // truncated to n1·n2 bits
 //
 //   Decrypt(dk, (u, v)) -> Option<m>
-//       y   = sample_fixed_weight(XOF(seed_dk))    // re-derived secret
+//       y   = sample_fixed_weight(XOF(seed_dk))        // re-derived secret (ref #1)
 //       tmp = v + u·y   = C.Encode(m) + (x·r2 + r1·y + e)
 //       m   = C.Decode(tmp)                        // None on decode failure
 //
@@ -31,14 +31,17 @@
 // PKE.Keygen expands seed_pke into (seed_dk, seed_ek) via the "I" function =
 // SHA3-512(seed_pke ‖ 0x02), provided by `hash::i_pke_seed`. The XOF calls here
 // go through `hash::xof`, which appends the 0x01 domain separator. Domain
-// separators are fully wired (see hash.rs); the only remaining KAT gap is the
-// sampler below.
+// separators are fully wired (see hash.rs).
 //
-// ── Sampler split (spec 2025) ─────────────────────────────────────────────────
-// The two fixed-weight roles use different samplers, matching the reference:
-//   • x, y (long-term secret) ← sample_fixed_weight       (rejection sampling)
-//   • r2, e, r1 (ephemeral)   ← sample_fixed_weight_mod    (Barrett "mod" sampler)
-// See poly/sampling.rs for why, and for the exact Barrett procedure.
+// ── Fixed-weight samplers (spec 2025) ─────────────────────────────────────────
+// The reference uses TWO different fixed-weight routines, picked per role (see
+// hqc.c). They are NOT interchangeable — using the wrong one is a KAT mismatch:
+//   • x, y (long-term secret) ← sample_fixed_weight     (ref vect_sample_fixed_weight1:
+//                                24-bit BE, rejection, Barrett mod N, redraw-on-dup)
+//   • r2, e, r1 (ephemeral)   ← sample_fixed_weight_mod (ref vect_sample_fixed_weight2:
+//                                4-byte LE, i+((rand·(N−i))>>32), backward dedup)
+// See poly/sampling.rs for both procedures and KAT.md "Sampler fix" for how the
+// split was confirmed against reference_impl/src/vector.c.
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -98,6 +101,10 @@ pub fn keygen<P: HqcParams>(seed_pke: &[u8; SEED_BYTES]) -> (EncryptionKey<P>, D
     let (seed_dk, seed_ek) = hash::i_pke_seed(seed_pke);
 
     // (y, x) ← sample_fixed_weight ×2 from XOF(seed_dk); y first, then x.
+    // The secret vectors use the reference's `vect_sample_fixed_weight1`
+    // (24-bit BE, rejection, Barrett mod N, redraw-on-duplicate) — NOT the mod
+    // sampler used for the ephemerals (`vect_sample_fixed_weight2`). See
+    // hqc.c:47-48 and KAT.md "Sampler fix".
     let mut xof_dk = hash::xof(&seed_dk[..]);
     let y = sample_fixed_weight::<P>(&mut xof_dk, P::OMEGA);
     let x = sample_fixed_weight::<P>(&mut xof_dk, P::OMEGA);
@@ -156,7 +163,8 @@ pub fn encrypt<P: HqcParams>(ek: &EncryptionKey<P>, m: &[u8], theta: &[u8]) -> (
 /// HQC-PKE.Decrypt. Returns `Some(m)` (K bytes) on success, `None` if the inner
 /// code fails to decode.
 pub fn decrypt<P: HqcParams>(dk: &DecryptionKey, u: &Poly<P>, v: &Poly<P>) -> Option<Vec<u8>> {
-    // Re-derive the secret y from seed_dk.
+    // Re-derive the secret y from seed_dk. Must use the SAME sampler as keygen
+    // (sample_fixed_weight, ref #1) or decryption would reconstruct a different y.
     let mut xof_dk = hash::xof(&dk.seed_dk[..]);
     let y = sample_fixed_weight::<P>(&mut xof_dk, P::OMEGA);
 

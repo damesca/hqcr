@@ -7,7 +7,7 @@ Context file for Claude Code. Read this before touching any code in this repo.
 ## Working instructions
 
 - Never run `cargo` commands (e.g. `cargo test`, `cargo check`, `cargo build`). Only provide the command for the user to run in their terminal.
-
+- Never run any code without asking. Usually it is better to provide/write some script and tell me to run it myself, giving me the command to do so.
 ---
 
 ---
