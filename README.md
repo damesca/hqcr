@@ -187,6 +187,34 @@ Benchmarks (criterion) are likewise scaffolded for a future step:
 cargo bench                 # stub for now
 ```
 
+## Sampler distribution analysis
+
+An example binary generates empirical frequency distributions for the three
+polynomial samplers and writes a self-contained HTML report you can open in any
+browser.
+
+```bash
+cargo run --release --example sampler_distribution                 # HQC-128, 20 000 trials
+cargo run --release --example sampler_distribution -- 192 50000    # HQC-192, 50 000 trials
+cargo run --release --example sampler_distribution -- 256 20000    # HQC-256, 20 000 trials
+```
+
+Output: `sampler_distribution_<param>.html` in the current directory. Each
+sampler card shows:
+
+- **Per-position frequency curve** — should be flat at `weight/N` (green
+  reference line); any positional bias appears as a slope or spike.
+- **Histogram of per-position set-counts** — should match a
+  `Binomial(trials, weight/N)` bell curve (orange overlay).
+- **χ²/dof** — goodness-of-fit against the ideal flat distribution; values
+  near 1.0 indicate an unbiased sampler.
+
+`sample_fixed_weight` (secret x/y) and `sample_fixed_weight_mod` (ephemeral
+r1/r2/e) should both read χ²/dof ≈ 1.0. The `mod` sampler may show a barely
+visible excess at the very lowest positions (its backward duplicate-resolution
+step maps collisions to small indices), but it is too small to see at typical
+trial counts.
+
 ## License
 
 Licensed under either of **MIT** or **Apache-2.0** at your option.
