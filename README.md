@@ -83,8 +83,68 @@ Design notes worth knowing:
 - **Zeroization.** Secret key material, seeds, and ephemeral randomness are
   wrapped in `Zeroizing` / `ZeroizeOnDrop`.
 
-For the full design rationale and the remaining roadmap (API polish, optimized
-`poly_mul` via Karatsuba / SIMD), see [`CLAUDE.md`](./CLAUDE.md).
+The dense×dense ring multiply (the decrypt hot path) uses limb-level
+**Karatsuba** with a carry-less word-multiply leaf; on x86-64 built with
+`+pclmulqdq` that leaf becomes a single `pclmulqdq` instruction (see
+[Benchmarks](#benchmarks)). For the full design rationale and the remaining
+roadmap (constant-time / zeroize audit, crate metadata), see
+[`CLAUDE.md`](./CLAUDE.md).
+
+## Building
+
+### Default (portable, no `unsafe`)
+
+The default build uses the portable Karatsuba + software carry-less multiply
+leaf. Works on every target:
+
+```bash
+cargo build --release
+cargo test
+```
+
+### With hardware `pclmulqdq` (x86-64, recommended on modern CPUs)
+
+Enables the `pclmulqdq` carry-less multiply instruction as the Karatsuba leaf
+— the only `unsafe` in the crate. Available on any x86-64 CPU since ~2010
+(Intel Westmere / AMD Bulldozer and later).
+
+```bash
+# bash / Linux / macOS
+RUSTFLAGS="-C target-feature=+pclmulqdq" cargo build --release
+
+# PowerShell / Windows
+$env:RUSTFLAGS="-C target-feature=+pclmulqdq"; cargo build --release
+```
+
+### Native CPU (all supported features, including `pclmulqdq`)
+
+Lets the compiler use every instruction your current CPU supports. Produces a
+binary that may not run on older machines:
+
+```bash
+# bash
+RUSTFLAGS="-C target-cpu=native" cargo build --release
+
+# PowerShell
+$env:RUSTFLAGS="-C target-cpu=native"; cargo build --release
+```
+
+### KAT feature — byte-for-byte validation harness
+
+The KAT and intermediate-values harnesses are gated behind the `kat` feature so
+they don't ship in the library. Compile them in only for testing:
+
+```bash
+cargo test --features kat --test kat -- --nocapture
+```
+
+### Summary
+
+| Build command | Karatsuba | Leaf multiply | `unsafe` |
+|:---|:---:|:---:|:---:|
+| `cargo build --release` | ✅ | portable (software) | none |
+| `… -C target-feature=+pclmulqdq` | ✅ | `pclmulqdq` (hardware) | 1 block |
+| `… -C target-cpu=native` | ✅ | `pclmulqdq` if available | 1 block |
 
 ## Usage
 
@@ -224,10 +284,24 @@ cargo bench --bench bench -- kem         # just keygen / encaps / decaps
 ```
 
 The `poly_mul` group reports `sparse_dense` (Mode A, the keygen / encrypt path)
-and `dense_ct` (Mode B, the constant-time decrypt path) per parameter set —
-these are the baseline to measure the planned Karatsuba / SIMD optimizations
-against. The `kem` group times `keygen` / `encaps` / `decaps`. HTML reports land
-in `target/criterion/`.
+and `dense_ct` (Mode B, the constant-time decrypt path) per parameter set. The
+`kem` group times `keygen` / `encaps` / `decaps`. HTML reports land in
+`target/criterion/`.
+
+Mode B uses limb-level Karatsuba with a carry-less word-multiply leaf. To
+benchmark the hardware `pclmulqdq` variant (see [Building](#building)):
+
+```bash
+# bash
+RUSTFLAGS="-C target-feature=+pclmulqdq" cargo bench --bench bench -- poly_mul
+
+# PowerShell
+$env:RUSTFLAGS="-C target-feature=+pclmulqdq"; cargo bench --bench bench -- poly_mul
+```
+
+Criterion compares against the previous run automatically, so run once without
+the flag (portable baseline) then once with it to see the speedup on
+`dense_ct/hqc128|192|256`.
 
 ## Sampler distribution analysis
 

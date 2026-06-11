@@ -238,10 +238,15 @@ but the sparse operand is the secret, so must be **constant-time** (the
 positions are secret). Use Mode A with the sparse operand but with branchless
 bit extraction.
 
-Optimization layers (implement in order, gated by `#[cfg(target_feature)]`):
-1. **L0 portable:** word-level, correct baseline
-2. **L1 Karatsuba:** ~2× over L0 for Mode B dense×dense
-3. **L2 SIMD:** `pclmulqdq` via `std::arch::x86_64` when `target_feature = "pclmul"`
+Optimization layers (all implemented — see Step 17 in the roadmap below):
+1. **L0 portable:** word-level baseline; retained for Mode A and as the
+   `#[cfg(test)]` oracle `mul_dense_ct_bitwise` for Mode B.
+2. **L1 Karatsuba (always on):** limb-level 3-multiply split, used by
+   `mul_dense_ct`. Mode A stays L0 (already linear in N).
+3. **L2 SIMD:** `pclmulqdq` carry-less word leaf via `std::arch::x86_64`, gated
+   `#[cfg(all(target_arch = "x86_64", target_feature = "pclmulqdq"))]` (Rust
+   feature string is `pclmulqdq`), portable `clmul64` fallback always present.
+   The only `unsafe` in the crate.
 
 ### `poly/sampling.rs`
 
@@ -601,14 +606,34 @@ Promoted the crate root from "wired" to "public-facing":
    `tests/` harnesses use them) but are marked `#[doc(hidden)]` and excluded
    from the stable API; `gf` stays `pub(crate)`.
 
-### Step 17 — `poly/mul.rs` optimization layers (performance only)
+### Step 17 — `poly/mul.rs` optimization layers ✅ done
 
-Correctness is unaffected; do this after KAT is green so the L0 baseline
-remains the reference oracle while optimizing.
-1. **L1 Karatsuba** for Mode B dense×dense (~2× over L0).
-2. **L2 SIMD** `pclmulqdq` via `std::arch::x86_64`, gated behind
-   `#[cfg(target_feature = "pclmul")]` with the safe L0 fallback always present.
-   This is the only place `unsafe` is permitted.
+Correctness is unaffected; the L0 bit-level Mode-B multiply is retained as a
+`#[cfg(test)]` oracle (`mul_dense_ct_bitwise`) and the new path is checked
+against it across random inputs for all three sets
+(`karatsuba_matches_bitwise_*`), alongside the existing naive / Mode-A-vs-B
+tests. Mode A (`mul_sparse_dense`) is unchanged (already linear in N).
+
+1. ✅ **L1 Karatsuba**, always compiled and always used by `mul_dense_ct`.
+   Implemented at the **limb level** (split the operand word arrays on a limb
+   boundary `h = ⌈n/2⌉`, so sub-operands stay word-aligned and recombination
+   needs no sub-word shifts): the 3-multiply identity
+   `A·B = z0 + (z1−z0−z2)·βʰ + z2·β²ʰ` over GF(2), recursing to a schoolbook
+   base case at `KARATSUBA_THRESHOLD = 16` limbs. Uses a single stack scratch
+   arena (`KARATSUBA_SCRATCH_WORDS = 4·MAX_N_WORDS + 256`; verified worst case
+   `S(901) = 3564 < 3860`). Writes the `2N`-bit product into the existing wide
+   accumulator, then `reduce_wide` folds mod `X^N − 1` (unchanged).
+2. ✅ **L2 SIMD** `pclmulqdq` as the leaf word multiply `clmul64`, gated by
+   `#[cfg(all(target_arch = "x86_64", target_feature = "pclmulqdq"))]`
+   (the Rust feature string is `pclmulqdq`, not `pclmul`). A branch-free
+   portable `clmul64` is the always-present fallback. The intrinsic block is
+   the **only `unsafe` in the crate**. Enable with
+   `RUSTFLAGS="-C target-feature=+pclmulqdq"` (or `-C target-cpu=native`).
+
+CT note: a full product visits every limb unconditionally and `clmul64` (both
+variants) is branch-free on operand values, so Mode B is constant-time w.r.t.
+both operands (in particular the secret `y`). A `debug_assert!` guards the
+"bits ≥ N are zero" invariant that the symmetric full-limb product relies on.
 
 ### Step 18 — `benches/bench.rs` ✅ done
 
@@ -638,7 +663,7 @@ Run: `cargo bench` (or `cargo bench --bench bench -- poly_mul`).
 | 14 | `mod` (Barrett) sampler for r1/r2/e | ✅ done (KAT-verified) |
 | 15 | KAT harness + vectors | ✅ done (byte-for-byte, all 3 sets) |
 | 16 | `lib.rs` API polish | ✅ done |
-| 17 | Karatsuba / SIMD `poly_mul` | ⬜ perf only |
+| 17 | Karatsuba / SIMD `poly_mul` | ✅ done |
 | 18 | criterion benches | ✅ done |
 | 19 | CT + zeroize audit, lint, metadata | ⬜ |
 
