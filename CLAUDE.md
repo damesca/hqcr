@@ -516,7 +516,7 @@ Bottom-up order based on module dependencies. Work through these one at a time.
 | 10 | `src/hash.rs` | ✅ done | (sha3 crate only) |
 | 11 | `src/pke.rs` | ✅ done | all of above |
 | 12 | `src/kem.rs` | ✅ done | pke, hash |
-| 13 | `src/lib.rs` | 🟡 module + re-exports wired | everything |
+| 13 | `src/lib.rs` | ✅ done | everything |
 
 ---
 
@@ -568,7 +568,7 @@ formula and byte order — all-zero rand ⇒ positions `0..weight`, all-ones ran
 > The KAT run is the authority; if it fails, revisit the byte order, the
 > `(n − i)` vs `n` reduction, and whether `x, y` also need the `mod` sampler.
 
-### Step 15 — KAT harness in `tests/kat.rs` (currently a 6-line stub)
+### Step 15 — KAT harness in `tests/kat.rs` ✅ done
 
 The only correctness oracle that ultimately matters.
 
@@ -586,16 +586,20 @@ Tasks:
 This step is the definition of done for correctness. If KAT passes for all
 three sets, the implementation is correct.
 
-### Step 16 — `lib.rs` API polish (finish Step 13)
+### Step 16 — `lib.rs` API polish (finish Step 13) ✅ done
 
-Promote the crate root from "wired" to "public-facing":
-1. Crate-level `//!` docs with a minimal keygen → encaps → decaps example.
-2. Flat re-exports of the KEM entry points (e.g. `hqc::keygen`, `hqc::encaps`,
-   `hqc::decaps`) and the `SharedKey` type, so callers need not reach into
-   `hqc::kem::`.
-3. Decide and document the public surface: keep low-level `pke`/`poly`/`codes`
-   `pub` for testing, or gate them behind a `pub(crate)` / `#[doc(hidden)]`
-   boundary and expose only the KEM.
+Promoted the crate root from "wired" to "public-facing":
+1. ✅ Crate-level `//!` docs with two keygen → encaps → decaps examples: a
+   `no_run` CSPRNG version and a runnable deterministic (seeded) doctest that
+   round-trips and asserts `k_send == k_recv`.
+2. ✅ Flat re-exports of the KEM entry points (`hqc::keygen`,
+   `hqc::keygen_from_seed`, `hqc::encaps`, `hqc::encaps_deterministic`,
+   `hqc::decaps`) plus `hqc::SharedKey`, `DecapsulationKey`, and `PublicKey`, so
+   callers need not reach into `hqc::kem::`.
+3. ✅ Public surface decided: `params`, `pke`, and `kem` stay documented `pub`;
+   the internals `poly` / `codes` / `parsing` / `hash` remain `pub` (the
+   `tests/` harnesses use them) but are marked `#[doc(hidden)]` and excluded
+   from the stable API; `gf` stays `pub(crate)`.
 
 ### Step 17 — `poly/mul.rs` optimization layers (performance only)
 
@@ -628,9 +632,9 @@ catch performance regressions.
 
 | Step | Item | Status |
 |:----:|:-----|:------:|
-| 14 | `mod` (Barrett) sampler for r1/r2/e | ✅ done (pending KAT proof) |
-| 15 | KAT harness + vectors | ⬜ depends on 14 |
-| 16 | `lib.rs` API polish | 🟡 partial |
+| 14 | `mod` (Barrett) sampler for r1/r2/e | ✅ done (KAT-verified) |
+| 15 | KAT harness + vectors | ✅ done (byte-for-byte, all 3 sets) |
+| 16 | `lib.rs` API polish | ✅ done |
 | 17 | Karatsuba / SIMD `poly_mul` | ⬜ perf only |
 | 18 | criterion benches | ⬜ |
 | 19 | CT + zeroize audit, lint, metadata | ⬜ |
