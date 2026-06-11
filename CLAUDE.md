@@ -610,11 +610,14 @@ remains the reference oracle while optimizing.
    `#[cfg(target_feature = "pclmul")]` with the safe L0 fallback always present.
    This is the only place `unsafe` is permitted.
 
-### Step 18 — `benches/bench.rs` (currently a 4-line stub)
+### Step 18 — `benches/bench.rs` ✅ done
 
-Criterion benchmarks for `poly_mul` (both modes), `keygen`, `encaps`, `decaps`
-across all three parameter sets. Use to verify Step 17 actually pays off and to
-catch performance regressions.
+Criterion benchmarks for `poly_mul` (both modes — `sparse_dense` Mode A and
+`dense_ct` Mode B), `keygen`, `encaps`, `decaps` across all three parameter
+sets. Two groups (`poly_mul`, `kem`), each parameterized by `hqc128/192/256`
+via `BenchmarkId`. Operands are derived from fixed seeds so runs are
+comparable. Use to verify Step 17 actually pays off and to catch regressions.
+Run: `cargo bench` (or `cargo bench --bench bench -- poly_mul`).
 
 ### Step 19 — Release hardening (cross-cutting, last)
 
@@ -636,7 +639,7 @@ catch performance regressions.
 | 15 | KAT harness + vectors | ✅ done (byte-for-byte, all 3 sets) |
 | 16 | `lib.rs` API polish | ✅ done |
 | 17 | Karatsuba / SIMD `poly_mul` | ⬜ perf only |
-| 18 | criterion benches | ⬜ |
+| 18 | criterion benches | ✅ done |
 | 19 | CT + zeroize audit, lint, metadata | ⬜ |
 
 ---

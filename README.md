@@ -214,11 +214,20 @@ diff tests/hqc-1/intermediates_values tests/hqc-1/intermediates_values.our
 
 ### Benchmarks
 
-Criterion benchmarks are scaffolded for a future step:
+Criterion benchmarks cover the ring-multiplication hot path (both modes) and the
+full KEM operations, across all three parameter sets:
 
 ```bash
-cargo bench                 # stub for now
+cargo bench                              # everything
+cargo bench --bench bench -- poly_mul    # just the multiplication group
+cargo bench --bench bench -- kem         # just keygen / encaps / decaps
 ```
+
+The `poly_mul` group reports `sparse_dense` (Mode A, the keygen / encrypt path)
+and `dense_ct` (Mode B, the constant-time decrypt path) per parameter set —
+these are the baseline to measure the planned Karatsuba / SIMD optimizations
+against. The `kem` group times `keygen` / `encaps` / `decaps`. HTML reports land
+in `target/criterion/`.
 
 ## Sampler distribution analysis
 
