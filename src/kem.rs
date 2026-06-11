@@ -94,18 +94,20 @@ impl<P: HqcParams> DecapsulationKey<P> {
     /// **Debug / KAT only** (gated behind the `kat` feature). Serializes the
     /// decapsulation key in the HQC *reference* secret-key wire format used by
     /// the official NIST KAT `.rsp` files, rather than the compressed 32-byte
-    /// `seed_KEM` returned by [`to_bytes`](Self::to_bytes):
+    /// `seed_KEM` returned by [`to_bytes`](Self::to_bytes).
+    ///
+    /// Matches the reference `crypto_kem_keypair` `dk_kem` layout (kem.c):
     ///
     /// ```text
-    /// sk = ek (PK_BYTES) ‖ seed_dk (32) ‖ seed_ek (32) ‖ σ (K)
+    /// sk = ek_pke (PK_BYTES) ‖ dk_pke (32) ‖ σ (K) ‖ seed_kem (32)
     /// ```
     ///
-    /// where `seed_dk ‖ seed_ek` is the 64-byte output of the I-split (so the
-    /// suffix is `64 + K` bytes, matching the upstream `|sk|` of 2321 / 4602 /
-    /// 7333). σ is truncated to the reference's `K` bytes: this crate squeezes a
-    /// 32-byte σ from the XOF, but the reference squeezes only `K` (`seed_pke`,
-    /// and therefore `pk`/`seed_dk`/`seed_ek`, are the first 32 bytes and so are
-    /// unaffected by that difference).
+    /// where `dk_pke = seed_dk` (the first half of the I-split, hqc.c
+    /// `hqc_pke_keygen`), σ is the reference's `K`-byte randomness (this crate
+    /// squeezes a 32-byte σ from the XOF, of which the first `K` bytes coincide
+    /// with the reference), and the suffix `seed_kem` is the master KEM seed.
+    /// Total suffix is `64 + K` bytes, matching the upstream `|sk|` of
+    /// 2321 / 4602 / 7333.
     ///
     /// Exposed purely so the KAT harness can emit a reference-shaped `sk` for
     /// byte-for-byte comparison against pqc-hqc.org. NOT part of the production
@@ -113,10 +115,10 @@ impl<P: HqcParams> DecapsulationKey<P> {
     #[cfg(feature = "kat")]
     pub fn expanded_secret_key_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(P::PK_BYTES + 2 * SEED_BYTES + P::K);
-        out.extend_from_slice(&self.ek.to_bytes()); // ek = seed_ek ‖ s
-        out.extend_from_slice(&self.dk_pke.seed_dk); // 32 B
-        out.extend_from_slice(&self.ek.seed_ek); // 32 B
-        out.extend_from_slice(&self.sigma[..P::K]); // K B (reference σ length)
+        out.extend_from_slice(&self.ek.to_bytes()); // ek_pke = seed_ek ‖ s
+        out.extend_from_slice(&self.dk_pke.seed_dk); // dk_pke = seed_dk, 32 B
+        out.extend_from_slice(&self.sigma[..P::K]); // σ, K B (reference length)
+        out.extend_from_slice(&self.seed_kem[..]); // seed_kem, 32 B
         debug_assert_eq!(out.len(), P::PK_BYTES + 2 * SEED_BYTES + P::K);
         out
     }

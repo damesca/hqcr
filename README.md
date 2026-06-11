@@ -14,18 +14,18 @@ the salted Fujisaki–Okamoto transform.
 
 **Do not use it to protect anything real.** In particular:
 
-- It is **not validated against the official KAT (Known Answer Test) vectors**
-  yet. The ephemeral sampler still uses rejection sampling instead of the spec's
-  Barrett-reduction (`mod`) sampler, so the wire bytes do not yet match the
-  reference implementation (see the roadmap in `CLAUDE.md`).
 - It has **not** received an independent security review, side-channel audit, or
   formal constant-time verification.
 - The implementation was developed **with the assistance of AI tools**, and has
   the limitations that implies — treat every line as needing review.
 
-It *does* currently produce correct round-trips (encrypt→decrypt, encaps→decaps,
-including implicit rejection) across all three parameter sets, verified by the
-crate's unit tests.
+On **correctness**, though, it is in good shape. It is **validated against the
+official NIST KAT (Known Answer Test) vectors**: the harness regenerates
+`pk` / `sk` / `ct` / `ss` from the official `.req` seeds and asserts they match
+the published `.rsp` files **byte-for-byte across all three parameter sets**. It
+also reproduces the reference `intermediates_values` trace step-by-step, and the
+encrypt→decrypt / encaps→decaps round-trips (including implicit rejection) pass
+for every parameter set. See [Running the tests](#running-the-tests).
 
 ## What is HQC?
 
@@ -55,7 +55,8 @@ src/
 ├── poly/
 │   ├── mod.rs          Poly<P>: bit-packed ring element [u64; N_WORDS], XOR add
 │   ├── mul.rs          Quasi-cyclic multiplication (sparse×dense, dense CT)
-│   └── sampling.rs     Fixed-weight + uniform sampling from a SHAKE256 XOF
+│   └── sampling.rs     Two fixed-weight samplers (rejection for x/y, Barrett
+│                       "mod" for r1/r2/e) + uniform, from a SHAKE256 XOF
 │
 ├── codes/
 │   ├── mod.rs          C.Encode / C.Decode (the RS ∘ RM concatenation)
@@ -82,8 +83,8 @@ Design notes worth knowing:
 - **Zeroization.** Secret key material, seeds, and ephemeral randomness are
   wrapped in `Zeroizing` / `ZeroizeOnDrop`.
 
-For the full design rationale and the remaining roadmap (Barrett sampler → KAT
-harness → API polish → SIMD `poly_mul`), see [`CLAUDE.md`](./CLAUDE.md).
+For the full design rationale and the remaining roadmap (API polish, optimized
+`poly_mul` via Karatsuba / SIMD), see [`CLAUDE.md`](./CLAUDE.md).
 
 ## Usage
 
@@ -120,7 +121,7 @@ fn main() {
 ### Deterministic API (reproducible, for tests / KAT)
 
 Every operation also has a deterministic variant that takes the randomness
-explicitly — handy for reproducibility and for the eventual KAT harness.
+explicitly — handy for reproducibility and used by the KAT harness.
 
 ```rust
 use hqc::{Hqc256, SEED_BYTES, SALT_BYTES};
@@ -165,23 +166,55 @@ for anything other than experimentation.
 
 ## Running the tests
 
-The unit tests cover the GF arithmetic, both code layers, polynomial
-multiplication, and the PKE / KEM round-trips (including implicit rejection and
-malformed-ciphertext handling) for all three parameter sets.
+### Unit tests
+
+Cover the GF(2^8) arithmetic, both code layers (Reed-Muller, Reed-Solomon),
+polynomial multiplication, the samplers, and the PKE / KEM round-trips
+(including implicit rejection and malformed-ciphertext handling) for all three
+parameter sets.
 
 ```bash
 cargo test
 ```
 
-A KAT (Known Answer Test) feature is scaffolded but **not yet functional** — it
-is blocked on the Barrett-reduction sampler. Once both land, the ground-truth
-run will be:
+The KAT and intermediate-values harnesses below are gated behind the `kat`
+feature, so plain `cargo test` skips them.
+
+### Known Answer Tests (KAT) — byte-for-byte validation
+
+`tests/kat.rs` re-seeds the 2025 HQC KAT PRNG (a SHAKE256 XOF — *not* the legacy
+AES-CTR DRBG) with each official `.req` seed, runs `keygen → encaps → decaps`,
+writes a sibling `*.our.rsp`, and **asserts every `pk` / `sk` / `ct` / `ss`
+matches the official `.rsp` byte-for-byte** for HQC-128 / 192 / 256. On a
+mismatch it reports the count, field, and first differing offset.
 
 ```bash
-cargo test --features kat   # not wired up yet — see CLAUDE.md roadmap
+cargo test --features kat --test kat -- --nocapture
 ```
 
-Benchmarks (criterion) are likewise scaffolded for a future step:
+The official vectors live in `tests/hqc-{1,3,5}/PQCkemKAT_*.rsp` and are the
+assertion oracle — they are never overwritten.
+
+### Intermediate-values trace
+
+`tests/intermediate.rs` regenerates the reference `intermediates_values`
+step-by-step trace (every keygen / encaps / decaps intermediate for count 0) and
+writes `intermediates_values.our` alongside the official file.
+
+```bash
+cargo test --features kat --test intermediate -- --nocapture
+```
+
+It matches the reference `tests/hqc-{1,3,5}/intermediates_values` byte-for-byte;
+to confirm, diff the two (they should be identical):
+
+```bash
+diff tests/hqc-1/intermediates_values tests/hqc-1/intermediates_values.our
+```
+
+### Benchmarks
+
+Criterion benchmarks are scaffolded for a future step:
 
 ```bash
 cargo bench                 # stub for now

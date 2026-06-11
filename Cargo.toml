@@ -14,8 +14,7 @@ rand_core = "0.6"
 [dev-dependencies]
 criterion = "0.5"
 hex       = "0.4"
-aes       = "0.8"        # NIST AES-256-CTR DRBG for KAT seed expansion (test-only)
-sha3      = "0.10"       # raw SHAKE256 reads in the intermediate-values harness (test-only)
+sha3      = "0.10"       # SHAKE256 KAT PRNG + raw reads in the intermediate-values harness (test-only)
 
 [features]
 # Enables the KAT generation/verification harness in tests/kat.rs.
