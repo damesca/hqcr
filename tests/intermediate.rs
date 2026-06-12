@@ -33,12 +33,12 @@ use std::fs;
 
 use sha3::digest::XofReader;
 
-use hqc::codes::{self, reed_muller, reed_solomon};
-use hqc::poly::mul::{mul_dense_ct, mul_sparse_dense};
-use hqc::poly::sampling::{sample_fixed_weight, sample_fixed_weight_mod, sample_uniform};
-use hqc::poly::Poly;
-use hqc::{hash, kem, parsing, pke};
-use hqc::{Hqc128, Hqc192, Hqc256, HqcParams};
+use hqcr::codes::{self, reed_muller, reed_solomon};
+use hqcr::poly::mul::{mul_dense_ct, mul_sparse_dense};
+use hqcr::poly::sampling::{sample_fixed_weight, sample_fixed_weight_mod, sample_uniform};
+use hqcr::poly::Poly;
+use hqcr::{hash, kem, parsing, pke};
+use hqcr::{Hqc128, Hqc192, Hqc256, HqcParams};
 
 // ── .req parsing ──────────────────────────────────────────────────────────────
 

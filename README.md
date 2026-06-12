@@ -1,4 +1,4 @@
-# hqc
+# hqcr
 
 A pure-Rust implementation of **HQC (Hamming Quasi-Cyclic)**, the code-based
 post-quantum KEM selected by NIST in March 2025. Includes both the IND-CPA
@@ -148,7 +148,7 @@ cargo test --features kat --test kat -- --nocapture
 
 ## Usage
 
-The KEM lives in the `hqc::kem` module and is generic over a parameter set.
+The KEM lives in the `hqcr::kem` module and is generic over a parameter set.
 
 ### Encapsulate / decapsulate (with your own RNG)
 
@@ -157,8 +157,8 @@ source. The shared secret `K` produced by `encaps` matches the one recovered by
 `decaps`.
 
 ```rust
-use hqc::Hqc128;
-use hqc::kem;
+use hqcr::Hqc128;
+use hqcr::kem;
 
 fn main() {
     // Bring your own cryptographically secure RNG (e.g. `rand::rngs::OsRng`,
@@ -184,8 +184,8 @@ Every operation also has a deterministic variant that takes the randomness
 explicitly — handy for reproducibility and used by the KAT harness.
 
 ```rust
-use hqc::{Hqc256, SEED_BYTES, SALT_BYTES};
-use hqc::kem;
+use hqcr::{Hqc256, SEED_BYTES, SALT_BYTES};
+use hqcr::kem;
 
 // Keygen from a fixed 32-byte seed_KEM.
 let seed_kem = [0x42u8; SEED_BYTES];
@@ -202,11 +202,11 @@ assert_eq!(kem::decaps::<Hqc256>(&dk, &ct), k);
 ### Serialization
 
 ```rust
-use hqc::Hqc192;
-use hqc::kem;
-use hqc::pke::EncryptionKey;
+use hqcr::Hqc192;
+use hqcr::kem;
+use hqcr::pke::EncryptionKey;
 
-let seed = [7u8; hqc::SEED_BYTES];
+let seed = [7u8; hqcr::SEED_BYTES];
 let (ek, dk) = kem::keygen_from_seed::<Hqc192>(&seed);
 
 // Public key ↔ bytes (ekKEM wire format: seed_ek ‖ s).
@@ -220,7 +220,7 @@ let dk_again = kem::DecapsulationKey::<Hqc192>::from_bytes(&dk_bytes[..]).unwrap
 
 ### Lower-level PKE
 
-If you want the IND-CPA layer directly, `hqc::pke` exposes `keygen`, `encrypt`,
+If you want the IND-CPA layer directly, `hqcr::pke` exposes `keygen`, `encrypt`,
 and `decrypt`. Note this layer is **not** CCA-secure on its own — use the KEM
 for anything other than experimentation.
 

@@ -18,12 +18,12 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
-use hqc::hash;
-use hqc::poly::mul::{mul_dense_ct, mul_sparse_dense};
-use hqc::poly::sampling::{sample_fixed_weight, sample_uniform};
-use hqc::poly::Poly;
-use hqc::{decaps, encaps_deterministic, keygen_from_seed};
-use hqc::{Hqc128, Hqc192, Hqc256, HqcParams, SALT_BYTES, SEED_BYTES};
+use hqcr::hash;
+use hqcr::poly::mul::{mul_dense_ct, mul_sparse_dense};
+use hqcr::poly::sampling::{sample_fixed_weight, sample_uniform};
+use hqcr::poly::Poly;
+use hqcr::{decaps, encaps_deterministic, keygen_from_seed};
+use hqcr::{Hqc128, Hqc192, Hqc256, HqcParams, SALT_BYTES, SEED_BYTES};
 
 /// Build a deterministic dense (uniform) and sparse (weight-ω) operand pair for
 /// the multiplication benchmarks, derived from a fixed seed so every run uses

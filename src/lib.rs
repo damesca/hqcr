@@ -1,4 +1,4 @@
-//! # hqc — Hamming Quasi-Cyclic post-quantum KEM
+//! # hqcr — Hamming Quasi-Cyclic post-quantum KEM
 //!
 //! A pure-Rust implementation of **HQC**, the code-based key-encapsulation
 //! mechanism selected by NIST in March 2025. It provides the IND-CCA2 KEM
@@ -24,12 +24,12 @@
 //! e.g. `rand::rngs::OsRng`):
 //!
 //! ```no_run
-//! use hqc::Hqc128;
+//! use hqcr::Hqc128;
 //!
 //! # fn demo<R: rand_core::RngCore + rand_core::CryptoRng>(rng: &mut R) {
-//! let (ek, dk) = hqc::keygen::<Hqc128, _>(rng);     // public + secret key
-//! let (k_send, ct) = hqc::encaps::<Hqc128, _>(rng, &ek); // shared secret + capsule
-//! let k_recv = hqc::decaps::<Hqc128>(&dk, &ct);     // recovered shared secret
+//! let (ek, dk) = hqcr::keygen::<Hqc128, _>(rng);     // public + secret key
+//! let (k_send, ct) = hqcr::encaps::<Hqc128, _>(rng, &ek); // shared secret + capsule
+//! let k_recv = hqcr::decaps::<Hqc128>(&dk, &ct);     // recovered shared secret
 //! assert_eq!(k_send, k_recv);
 //! # }
 //! ```
@@ -38,17 +38,17 @@
 //! used by the KAT harness. This example actually runs and round-trips:
 //!
 //! ```
-//! use hqc::Hqc128;
+//! use hqcr::Hqc128;
 //!
 //! // In production, draw `seed`, `m`, and `salt` from a CSPRNG (see `keygen`).
-//! let seed = [0x42u8; hqc::SEED_BYTES];
-//! let (ek, dk) = hqc::keygen_from_seed::<Hqc128>(&seed);
+//! let seed = [0x42u8; hqcr::SEED_BYTES];
+//! let (ek, dk) = hqcr::keygen_from_seed::<Hqc128>(&seed);
 //!
 //! let m = [0x11u8; 16]; // Hqc128::K == 16 bytes
-//! let salt = [0x22u8; hqc::SALT_BYTES];
-//! let (k_send, ct) = hqc::encaps_deterministic::<Hqc128>(&ek, &m, &salt);
+//! let salt = [0x22u8; hqcr::SALT_BYTES];
+//! let (k_send, ct) = hqcr::encaps_deterministic::<Hqc128>(&ek, &m, &salt);
 //!
-//! let k_recv = hqc::decaps::<Hqc128>(&dk, &ct);
+//! let k_recv = hqcr::decaps::<Hqc128>(&dk, &ct);
 //! assert_eq!(k_send, k_recv);
 //! ```
 //!
@@ -87,7 +87,7 @@ pub use params::{SALT_BYTES, SEED_BYTES, SHARED_KEY_BYTES};
 pub use hash::SharedKey;
 
 // KEM key types and entry points, flattened to the crate root so callers write
-// `hqc::keygen` / `hqc::encaps` / `hqc::decaps` rather than reaching into
-// `hqc::kem::`.
+// `hqcr::keygen` / `hqcr::encaps` / `hqcr::decaps` rather than reaching into
+// `hqcr::kem::`.
 pub use kem::{DecapsulationKey, PublicKey};
 pub use kem::{decaps, encaps, encaps_deterministic, keygen, keygen_from_seed};

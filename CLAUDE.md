@@ -597,10 +597,10 @@ Promoted the crate root from "wired" to "public-facing":
 1. ✅ Crate-level `//!` docs with two keygen → encaps → decaps examples: a
    `no_run` CSPRNG version and a runnable deterministic (seeded) doctest that
    round-trips and asserts `k_send == k_recv`.
-2. ✅ Flat re-exports of the KEM entry points (`hqc::keygen`,
-   `hqc::keygen_from_seed`, `hqc::encaps`, `hqc::encaps_deterministic`,
-   `hqc::decaps`) plus `hqc::SharedKey`, `DecapsulationKey`, and `PublicKey`, so
-   callers need not reach into `hqc::kem::`.
+2. ✅ Flat re-exports of the KEM entry points (`hqcr::keygen`,
+   `hqcr::keygen_from_seed`, `hqcr::encaps`, `hqcr::encaps_deterministic`,
+   `hqcr::decaps`) plus `hqcr::SharedKey`, `DecapsulationKey`, and `PublicKey`, so
+   callers need not reach into `hqcr::kem::`.
 3. ✅ Public surface decided: `params`, `pke`, and `kem` stay documented `pub`;
    the internals `poly` / `codes` / `parsing` / `hash` remain `pub` (the
    `tests/` harnesses use them) but are marked `#[doc(hidden)]` and excluded

@@ -46,7 +46,7 @@ use rand_core::{CryptoRng, RngCore};
 use sha3::digest::{ExtendableOutput, Update, XofReader};
 use sha3::Shake256;
 
-use hqc::{kem, Hqc128, Hqc192, Hqc256, HqcParams};
+use hqcr::{kem, Hqc128, Hqc192, Hqc256, HqcParams};
 
 // ── 2025 HQC KAT PRNG (SHAKE256-based — the reference `symmetric.c` PRNG) ───────
 //

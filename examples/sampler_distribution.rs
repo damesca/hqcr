@@ -27,9 +27,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sha3::digest::{ExtendableOutput, Update, XofReader};
 use sha3::Shake256;
 
-use hqc::params::{Hqc128, Hqc192, Hqc256, HqcParams};
-use hqc::poly::sampling::{sample_fixed_weight, sample_fixed_weight_mod, sample_uniform};
-use hqc::poly::Poly;
+use hqcr::params::{Hqc128, Hqc192, Hqc256, HqcParams};
+use hqcr::poly::sampling::{sample_fixed_weight, sample_fixed_weight_mod, sample_uniform};
+use hqcr::poly::Poly;
 
 // ── Tunable defaults ────────────────────────────────────────────────────────
 const DEFAULT_TRIALS: usize = 20_000;
