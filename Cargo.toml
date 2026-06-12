@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Pure-Rust implementation of HQC (Hamming Quasi-Cyclic) post-quantum KEM"
+exclude = [
+    "tests/hqc-1/**",
+    "tests/hqc-3/**",
+    "tests/hqc-5/**",
+    "hqc_notes.md",
+]
 
 [dependencies]
 sha3     = "0.10"

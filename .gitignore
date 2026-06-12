@@ -13,6 +13,10 @@ target
 # Contains mutation testing data
 **/mutants.out*/
 
+# Generated KAT output files — produced by `cargo test --features kat`
+tests/hqc-*/**.our.rsp
+tests/hqc-*/intermediates_values.our
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
