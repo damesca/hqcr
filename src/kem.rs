@@ -251,6 +251,19 @@ fn ct_select_key(a: &SharedKey, b: &SharedKey, choice: Choice) -> SharedKey {
     out
 }
 
+// ── Constant-time audit: asm spot-check shim (Layer 3) ─────────────────────────
+//
+// `#[no_mangle] #[inline(never)]` so `ct_select_key` keeps a standalone symbol in
+// `cargo asm` output. Compiled only under `--features ct-audit`; no effect on a
+// normal build. The audit reads it to confirm the `subtle` select is branch-free
+// masking (AND/XOR) and never a `jcc` on `choice`. See docs/audit/constant-time.md §5.
+#[cfg(feature = "ct-audit")]
+#[no_mangle]
+#[inline(never)]
+pub fn ct_asm_select_key(a: &SharedKey, b: &SharedKey, choice: u8) -> SharedKey {
+    ct_select_key(a, b, Choice::from(choice & 1))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

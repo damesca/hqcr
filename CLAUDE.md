@@ -646,15 +646,98 @@ Run: `cargo bench` (or `cargo bench --bench bench -- poly_mul`).
 
 ### Step 19 — Release hardening (cross-cutting, last)
 
-1. **Constant-time audit:** walk every row of the Constant-time requirements
-   table against the final code; confirm no `==`/early-exit on secret-derived
-   data (especially the new `mod` sampler and `kem::decaps`).
-2. **Zeroize audit:** confirm every secret listed in the Zeroize discipline
-   section is `ZeroizeOnDrop` or `Zeroizing`-wrapped end to end.
-3. Run `cargo clippy` / `cargo fmt`; resolve warnings. Consider `cargo miri` on
-   the unit tests for UB in the SIMD path.
+Because the CT/zeroize machinery was written inline during Steps 1–18, the
+audits below are mostly a **verification-and-documentation** pass, not new
+construction. Decisions for this pass: **all three** verification layers
+(manual + empirical timing + IR/asm); gaps are **documented as known
+limitations**, not remediated (KAT-verified `src/` logic stays untouched);
+scope is the **two audits only** (items 3–4 below are deferred). Deliverables
+are *measurement instruments + docs* — no behavioural change to the library.
+
+#### 19a — Constant-time audit
+
+A CT audit hunts three leak classes against secret-derived data: (1)
+secret-dependent branches / early-exit, (2) secret-dependent memory access
+(table indices), (3) secret-dependent loop bounds. **"Secret" is transitive** —
+in `decaps`, `m'` is secret ⇒ decoded codeword is secret ⇒ the RS/RM decoder's
+inputs (and any GF table index inside it) are secret.
+
+Roadmap:
+
+1. **Audit log skeleton.** Create `docs/audit/constant-time.md` with columns:
+   *location · data classification · leak class · verdict · evidence
+   (file:line + which layer confirmed it)*.
+2. **Layer 1 — manual review.** Walk every row of the Constant-time
+   requirements table plus the inventory below; classify inputs, trace the
+   transitive secret chain, record verdict + `file:line`.
+3. **Layer 2 — empirical timing.** New `tests/ct_timing.rs` behind an opt-in
+   `ct-audit` feature; dudect-style Welch t-test on `kem::decaps` and
+   `mul_dense_ct` (fixed vs random secret, `_rdtsc` or `dudect-bencher`).
+   Record `|t|` (>10 ⇒ leak signal; ≈0 ⇒ no evidence). Note laptop/Windows
+   noise — evidence, never proof.
+4. **Layer 3 — IR/asm.** Emit asm for `mul_dense_ct`, `ct_select_key`, the RM
+   argmax, and the portable `clmul64`; confirm `subtle` selects became
+   `cmov`/masking, not `jcc` on a secret register. `cargo miri test` on the
+   `pclmulqdq` path. Repeat for portable and `+pclmulqdq` builds.
+
+Inventory (verdicts to confirm, not take on faith):
+
+| Location | State | Action |
+|:---|:---|:---|
+| `sampling.rs` `sample_fixed_weight_mod` (r1/r2/e) | CT (`ct_eq` + `conditional_select`, fixed loops) | verify ✅ |
+| `sampling.rs` `sample_fixed_weight` (x/y) | **non-CT** rejection (`:119,133`) | document (reference-accepted, keygen-only) |
+| `mul.rs` `mul_dense_ct` (secret `y`) | CT branchless Karatsuba + masking `clmul64` | verify ✅ + asm |
+| `mul.rs` `pclmulqdq` path | only `unsafe` in crate | miri + asm |
+| `kem.rs` `decaps` select/compare (`:220–233`, `ct_select_key`) | CT; only branch is **public** length check | verify ✅ |
+| `reed_muller.rs` argmax (`:196–206`) | CT 128-scan, `conditional_select` | verify ✅ |
+| `reed_solomon.rs` Chien/BM **+** `gf.rs` `gf_mul`/`gf_div`/`gf_inv` | **NOT CT** — zero-branch (`gf.rs:69`), secret-indexed `GF_LOG`/`GF_EXP`, conditional Chien `push` (`:190`), BM branches on syndromes | **document — headline finding** |
+| `parsing.rs` `unpack_ciphertext` length check | branch on **public** length | OK |
+
+The headline known-limitation: the **RS decoder + GF(2⁸) table lookups are not
+constant-time and process the secret-derived decoded codeword**. Document the
+transitive-secret reasoning, severity, and why it's deferred (a CT GF/decoder
+layer is a substantial rewrite that risks the KAT-verified paths). Context: the
+2025 spec's Barrett `mod` sampler (this crate's CT `sample_fixed_weight_mod`)
+exists *because of* the 2022 HQC/BIKE rejection-sampling timing attacks — the
+encryption side already absorbed that lesson; the decoder is the same class of
+issue on the decryption side.
+
+#### 19b — Zeroize audit
+
+A zeroize audit traces each secret's full lifetime (create → every copy/clone →
+drop) and confirms a wipe on every exit path including panics. Watch three
+defeaters: `Copy` types (bitwise copies escape `ZeroizeOnDrop`), `Vec`/`String`
+growth (realloc leaves stale buffers), and `mem::forget`/leaks (skip `Drop`).
+
+Roadmap:
+
+1. **Audit log.** Create `docs/audit/zeroize.md`.
+2. **Lifetime traces.** For each secret below, write create→copy→drop; confirm
+   no `Copy` on secret types, no growing secret `Vec`, no `mem::forget`.
+3. **Document low-risk gaps** with rationale.
+
+| Secret | State | Action |
+|:---|:---|:---|
+| `Poly<P>` (x, y, r1, r2, e) | `#[derive(Zeroize, ZeroizeOnDrop)]` (`poly/mod.rs:25`) | verify ✅ |
+| seeds `seed_dk`/`seed_kem`/`seed_pke`/`sigma` | `Zeroizing` / `DecryptionKey: ZeroizeOnDrop` | verify ✅ |
+| `m'` recovered plaintext | `Zeroizing<Vec<u8>>` (`kem.rs:221`) | verify ✅ |
+| `theta` | `Theta = Zeroizing<[u8;_]>` (`hash.rs:48`) | verify ✅ |
+| `salt`; `codes/mod.rs` `rs_cw`/`buf`; `poly_to_bytes` out | plain, dropped but not wiped | document (low-risk) |
+
+#### Deferred (not this pass)
+
+3. Run `cargo clippy` / `cargo fmt`; resolve warnings.
 4. Fill in crate metadata (README, keywords, categories) for a `crates.io`
    publish if desired.
+
+#### Audit "done" criteria
+
+Every inventory row has a recorded verdict + evidence (with the confirming
+layer); `tests/ct_timing.rs` runs and its `|t|` for `decaps` / `mul_dense_ct`
+are logged (`cargo test --features ct-audit --test ct_timing -- --nocapture`);
+`cargo miri test` clean on the `pclmulqdq` path; asm spot-checks recorded; every
+secret has a lifetime trace; "Known limitations" written. No library
+behavioural change, so `cargo test` and the KAT suite must still pass unchanged.
 
 ### Status summary
 
@@ -665,7 +748,9 @@ Run: `cargo bench` (or `cargo bench --bench bench -- poly_mul`).
 | 16 | `lib.rs` API polish | ✅ done |
 | 17 | Karatsuba / SIMD `poly_mul` | ✅ done |
 | 18 | criterion benches | ✅ done |
-| 19 | CT + zeroize audit, lint, metadata | ⬜ |
+| 19a | Constant-time audit (manual + timing + asm/miri) | ✅ done (see `docs/audit/constant-time.md`) |
+| 19b | Zeroize audit | ⬜ roadmap written (see Step 19) |
+| 19c/d | lint, crate metadata | ⬜ deferred |
 
 ---
 

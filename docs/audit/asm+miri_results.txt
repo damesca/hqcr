@@ -1,0 +1,1027 @@
+### ct_asm_clmul64
+
+.section .text,"xr",one_only,ct_asm_clmul64,unique,21
+        .globl  ct_asm_clmul64
+        .p2align        4
+ct_asm_clmul64:
+        .cv_func_id 883
+.seh_proc ct_asm_clmul64
+        push rsi
+        .seh_pushreg rsi
+        sub rsp, 160
+        .seh_stackalloc 160
+        movapd xmmword ptr [rsp + 144], xmm15
+        .seh_savexmm xmm15, 144
+        movapd xmmword ptr [rsp + 128], xmm14
+        .seh_savexmm xmm14, 128
+        movdqa xmmword ptr [rsp + 112], xmm13
+        .seh_savexmm xmm13, 112
+        movapd xmmword ptr [rsp + 96], xmm12
+        .seh_savexmm xmm12, 96
+        movapd xmmword ptr [rsp + 80], xmm11
+        .seh_savexmm xmm11, 80
+        movapd xmmword ptr [rsp + 64], xmm10
+        .seh_savexmm xmm10, 64
+        movaps xmmword ptr [rsp + 48], xmm9
+        .seh_savexmm xmm9, 48
+        movaps xmmword ptr [rsp + 32], xmm8
+        .seh_savexmm xmm8, 32
+        movapd xmmword ptr [rsp + 16], xmm7
+        .seh_savexmm xmm7, 16
+        movaps xmmword ptr [rsp], xmm6
+        .seh_savexmm xmm6, 0
+        .seh_endprologue
+        .cv_inline_site_id 884 within 883 inlined_at 26 338 0
+        mov eax, edx
+        and eax, 1
+        neg rax
+        and rax, rcx
+        movq xmm0, rax
+        movq xmm1, rdx
+        pshufd xmm9, xmm1, 68
+        movq xmm1, rcx
+        pshufd xmm3, xmm1, 68
+        pxor xmm1, xmm1
+        movdqa xmm4, xmmword ptr [rip + __xmm@00000000000000020000000000000001]
+        mov eax, 60
+        movapd xmm6, xmmword ptr [rip + __xmm@00000000000000010000000000000001]
+        movdqa xmm8, xmmword ptr [rip + __xmm@000000000000003f000000000000003f]
+        xorpd xmm11, xmm11
+        xorpd xmm10, xmm10
+        .p2align        4
+.LBB21_1:
+        movdqa xmm14, xmm4
+        paddq xmm14, xmmword ptr [rip + __xmm@00000000000000020000000000000002]
+        movdqa xmm12, xmm9
+        psrlq xmm12, xmm4
+        pshufd xmm15, xmm4, 238
+        movdqa xmm2, xmm9
+        psrlq xmm2, xmm15
+        movsd xmm2, xmm12
+        movdqa xmm12, xmm9
+        psrlq xmm12, xmm14
+        pshufd xmm7, xmm14, 238
+        movdqa xmm5, xmm9
+        psrlq xmm5, xmm7
+        movsd xmm5, xmm12
+        andpd xmm2, xmm6
+        andpd xmm5, xmm6
+        .cv_inline_site_id 885 within 884 inlined_at 26 197 0
+        .cv_inline_site_id 886 within 885 inlined_at 27 2589 0
+        pxor xmm13, xmm13
+        psubq xmm13, xmm2
+        pxor xmm12, xmm12
+        movdqa xmm2, xmm3
+        psllq xmm2, xmm4
+        psubq xmm12, xmm5
+        movdqa xmm5, xmm3
+        psllq xmm5, xmm15
+        movsd xmm5, xmm2
+        movdqa xmm2, xmm3
+        psllq xmm2, xmm14
+        movdqa xmm14, xmm3
+        psllq xmm14, xmm7
+        movsd xmm14, xmm2
+        andpd xmm5, xmm13
+        pxor xmm0, xmm5
+        andpd xmm14, xmm12
+        pxor xmm1, xmm14
+        pxor xmm2, xmm2
+        psubq xmm2, xmm4
+        movdqa xmm5, xmmword ptr [rip + __xmm@000000000000003e000000000000003e]
+        psubq xmm5, xmm4
+        pand xmm2, xmm8
+        movdqa xmm7, xmm3
+        psrlq xmm7, xmm2
+        pshufd xmm2, xmm2, 238
+        movdqa xmm14, xmm3
+        psrlq xmm14, xmm2
+        pand xmm5, xmm8
+        movdqa xmm2, xmm3
+        psrlq xmm2, xmm5
+        pshufd xmm5, xmm5, 238
+        movdqa xmm15, xmm3
+        psrlq xmm15, xmm5
+        movsd xmm14, xmm7
+        movsd xmm15, xmm2
+        andpd xmm14, xmm13
+        xorpd xmm11, xmm14
+        andpd xmm15, xmm12
+        xorpd xmm10, xmm15
+        paddq xmm4, xmmword ptr [rip + __xmm@00000000000000040000000000000004]
+        add rax, -4
+        jne .LBB21_1
+        xorpd xmm10, xmm11
+        pshufd xmm2, xmm10, 238
+        pxor xmm2, xmm10
+        movq r8, xmm2
+        pxor xmm1, xmm0
+        pshufd xmm0, xmm1, 238
+        pxor xmm0, xmm1
+        movq r9, xmm0
+        lea rax, [4*rdx]
+        sar rax, 63
+        mov r10, rcx
+        shl r10, 61
+        and r10, rax
+        mov r11, rcx
+        shr r11, 3
+        and r11, rax
+        lea rax, [rdx + rdx]
+        sar rax, 63
+        mov rsi, rcx
+        shl rsi, 62
+        and rsi, rax
+        xor rsi, r10
+        mov r10, rcx
+        shr r10, 2
+        and r10, rax
+        xor r10, r11
+        sar rdx, 63
+        mov rax, rcx
+        shl rax, 63
+        and rax, rdx
+        xor rax, rsi
+        xor rax, r9
+        shr rcx
+        and rcx, rdx
+        xor rcx, r10
+        xor rcx, r8
+        mov rdx, rcx
+        movaps xmm6, xmmword ptr [rsp]
+        movaps xmm7, xmmword ptr [rsp + 16]
+        movaps xmm8, xmmword ptr [rsp + 32]
+        movaps xmm9, xmmword ptr [rsp + 48]
+        movaps xmm10, xmmword ptr [rsp + 64]
+        movaps xmm11, xmmword ptr [rsp + 80]
+        movaps xmm12, xmmword ptr [rsp + 96]
+        movaps xmm13, xmmword ptr [rsp + 112]
+        movaps xmm14, xmmword ptr [rsp + 128]
+        movaps xmm15, xmmword ptr [rsp + 144]
+        .seh_startepilogue
+        add rsp, 160
+        pop rsi
+        .seh_endepilogue
+        ret
+
+### ct_asm_select_key
+
+.section .text,"xr",one_only,ct_asm_select_key,unique,24
+        .globl  ct_asm_select_key
+        .p2align        4
+ct_asm_select_key:
+        .cv_func_id 896
+.seh_proc ct_asm_select_key
+        push rsi
+        .seh_pushreg rsi
+        push rdi
+        .seh_pushreg rdi
+        push rbx
+        .seh_pushreg rbx
+        sub rsp, 32
+        .seh_stackalloc 32
+        .seh_endprologue
+        mov rsi, r8
+        mov rdi, rdx
+        mov rbx, rcx
+        and r9b, 1
+        .cv_inline_site_id 897 within 896 inlined_at 4 264 0
+        mov ecx, r9d
+        call subtle::black_box
+        mov rcx, rbx
+        mov rdx, rdi
+        mov r8, rsi
+        mov r9d, eax
+        call hqcr::kem::ct_select_key
+        mov rax, rbx
+        .seh_startepilogue
+        add rsp, 32
+        pop rbx
+        pop rdi
+        pop rsi
+        .seh_endepilogue
+        ret
+
+### ct_asm_rm_decode
+
+.section .text,"xr",one_only,ct_asm_rm_decode,unique,23
+        .globl  ct_asm_rm_decode
+        .p2align        4
+ct_asm_rm_decode:
+        .cv_func_id 895
+        mov r8d, 3
+        jmp hqcr::codes::reed_muller::rm_decode
+
+### +pclmulqdq ct_asm_clmul64
+
+.section .text,"xr",one_only,ct_asm_clmul64,unique,21
+        .globl  ct_asm_clmul64
+        .p2align        4
+ct_asm_clmul64:
+        .cv_func_id 884
+        .cv_inline_site_id 885 within 884 inlined_at 26 338 0
+        .cv_inline_site_id 886 within 885 inlined_at 26 177 0
+        .cv_inline_site_id 887 within 886 inlined_at 29 1057 0
+        movq xmm0, rcx
+        .cv_inline_site_id 888 within 885 inlined_at 26 178 0
+        .cv_inline_site_id 889 within 888 inlined_at 29 1057 0
+        movq xmm1, rdx
+        .cv_inline_site_id 890 within 885 inlined_at 26 179 0
+        pclmulqdq xmm1, xmm0, 0
+        movq rax, xmm1
+        pshufd xmm0, xmm1, 238
+        movq rdx, xmm0
+        ret
+
+### miri clmul64_known_values
+
+running 1 test
+test poly::mul::tests::clmul64_known_values ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 132 filtered out; finished in 0.76s
+
+### miri +pclmulqdq ctmul64_known_values
+
+running 1 test
+test poly::mul::tests::clmul64_known_values ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 132 filtered out; finished in 0.76s
+
+### "hqcr::kem::ct_select_key"
+
+.section .text,"xr",one_only,hqcr::kem::ct_select_key,unique,1
+        .globl  hqcr::kem::ct_select_key
+        .p2align        4
+hqcr::kem::ct_select_key:
+        .cv_func_id 9
+        .cv_inline_site_id 10 within 9 inlined_at 4 249 0
+        .cv_inline_site_id 11 within 10 inlined_at 6 517 0
+        mov rax, rcx
+        neg r9b
+        movdqu xmm0, xmmword ptr [r8]
+        movdqu xmm1, xmmword ptr [rdx]
+        movzx ecx, r9b
+        movd xmm2, ecx
+        punpcklbw xmm2, xmm2
+        pshuflw xmm2, xmm2, 0
+        pshufd xmm2, xmm2, 68
+        .cv_inline_site_id 12 within 11 inlined_at 5 28 0
+        movdqa xmm3, xmm2
+        pandn xmm3, xmm0
+        pand xmm1, xmm2
+        por xmm1, xmm3
+        movdqu xmmword ptr [rax], xmm1
+        movdqu xmm0, xmmword ptr [r8 + 16]
+        movdqu xmm1, xmmword ptr [rdx + 16]
+        pand xmm1, xmm2
+        pandn xmm2, xmm0
+        por xmm2, xmm1
+        movdqu xmmword ptr [rax + 16], xmm2
+        ret
+
+### "hqcr::codes::reed_muller::rm_decode"
+
+.section .text,"xr",one_only,hqcr::codes::reed_muller::rm_decode,unique,10
+        .globl  hqcr::codes::reed_muller::rm_decode
+        .p2align        4
+hqcr::codes::reed_muller::rm_decode:
+        .cv_func_id 242
+.seh_proc _ZN4hqcr5codes11reed_muller9rm_decode17h3ba5599e28bcef1bE
+        push r15
+        .seh_pushreg r15
+        push r14
+        .seh_pushreg r14
+        push r12
+        .seh_pushreg r12
+        push rsi
+        .seh_pushreg rsi
+        push rdi
+        .seh_pushreg rdi
+        push rbp
+        .seh_pushreg rbp
+        push rbx
+        .seh_pushreg rbx
+        sub rsp, 320
+        .seh_stackalloc 320
+        movaps xmmword ptr [rsp + 304], xmm7
+        .seh_savexmm xmm7, 304
+        movaps xmmword ptr [rsp + 288], xmm6
+        .seh_savexmm xmm6, 288
+        .seh_endprologue
+        pxor xmm0, xmm0
+        movdqa xmmword ptr [rsp + 272], xmm0
+        movdqa xmmword ptr [rsp + 256], xmm0
+        movdqa xmmword ptr [rsp + 240], xmm0
+        movdqa xmmword ptr [rsp + 224], xmm0
+        movdqa xmmword ptr [rsp + 208], xmm0
+        movdqa xmmword ptr [rsp + 192], xmm0
+        movdqa xmmword ptr [rsp + 176], xmm0
+        movdqa xmmword ptr [rsp + 160], xmm0
+        movdqa xmmword ptr [rsp + 144], xmm0
+        movdqa xmmword ptr [rsp + 128], xmm0
+        movdqa xmmword ptr [rsp + 112], xmm0
+        movdqa xmmword ptr [rsp + 96], xmm0
+        movdqa xmmword ptr [rsp + 80], xmm0
+        movdqa xmmword ptr [rsp + 64], xmm0
+        movdqa xmmword ptr [rsp + 48], xmm0
+        movdqa xmmword ptr [rsp + 32], xmm0
+        .cv_inline_site_id 243 within 242 inlined_at 33 166 0
+        .cv_inline_site_id 244 within 243 inlined_at 32 850 0
+        .cv_inline_site_id 245 within 244 inlined_at 32 765 0
+        test r8, r8
+        je .LBB10_7
+        mov rax, rcx
+        mov ecx, 1
+        xor r9d, r9d
+        .p2align        4
+.LBB10_4:
+        mov r10, r9
+        mov r9, rcx
+        shl r10, 4
+        xor r11d, r11d
+        .p2align        4
+.LBB10_5:
+        mov rcx, r11
+        shr rcx, 3
+        or rcx, r10
+        cmp rcx, rdx
+        jae .LBB10_6
+        movzx esi, byte ptr [rax + rcx]
+        mov ecx, r11d
+        and cl, 7
+        shr esi, cl
+        add esi, esi
+        and esi, 2
+        movzx ecx, word ptr [rsp + 2*r11 + 32]
+        neg esi
+        add ecx, esi
+        inc ecx
+        mov word ptr [rsp + 2*r11 + 32], cx
+        .cv_inline_site_id 246 within 242 inlined_at 33 168 0
+        .cv_inline_site_id 247 within 246 inlined_at 32 850 0
+        .cv_inline_site_id 248 within 247 inlined_at 32 765 0
+        inc r11
+        cmp r11, 128
+        jne .LBB10_5
+        cmp r9, r8
+        mov rcx, r9
+        adc rcx, 0
+        cmp r9, r8
+        jb .LBB10_4
+.LBB10_7:
+        xor eax, eax
+        .p2align        4
+.LBB10_8:
+        .cv_inline_site_id 249 within 242 inlined_at 33 178 0
+        movdqa xmm0, xmmword ptr [rsp + 4*rax + 32]
+        pshuflw xmm1, xmm0, 232
+        pshufhw xmm1, xmm1, 232
+        pshufd xmm1, xmm1, 232
+        pshuflw xmm0, xmm0, 231
+        pshufhw xmm0, xmm0, 231
+        pshufd xmm0, xmm0, 232
+        pshuflw xmm0, xmm0, 177
+        movdqa xmm2, xmm0
+        paddw xmm2, xmm1
+        psubw xmm1, xmm0
+        punpcklwd xmm2, xmm1
+        movdqa xmmword ptr [rsp + 4*rax + 32], xmm2
+        add rax, 4
+        cmp rax, 64
+        jne .LBB10_8
+        movq xmm0, qword ptr [rsp + 32]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        pshufd xmm0, xmm0, 0
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq xmm0, qword ptr [rsp + 40]
+        pshufd xmm2, xmm0, 225
+        paddw xmm2, xmm0
+        pshufd xmm3, xmm0, 85
+        pshufd xmm0, xmm0, 0
+        psubw xmm0, xmm3
+        punpckldq xmm2, xmm0
+        punpcklqdq xmm1, xmm2
+        movdqa xmmword ptr [rsp + 32], xmm1
+        movq xmm0, qword ptr [rsp + 48]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        pshufd xmm0, xmm0, 0
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq xmm0, qword ptr [rsp + 56]
+        pshufd xmm2, xmm0, 225
+        paddw xmm2, xmm0
+        pshufd xmm3, xmm0, 85
+        pshufd xmm0, xmm0, 0
+        psubw xmm0, xmm3
+        punpckldq xmm2, xmm0
+        punpcklqdq xmm1, xmm2
+        movdqa xmmword ptr [rsp + 48], xmm1
+        movq xmm0, qword ptr [rsp + 64]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        pshufd xmm0, xmm0, 0
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq xmm0, qword ptr [rsp + 72]
+        pshufd xmm2, xmm0, 225
+        paddw xmm2, xmm0
+        pshufd xmm3, xmm0, 85
+        pshufd xmm0, xmm0, 0
+        psubw xmm0, xmm3
+        punpckldq xmm2, xmm0
+        punpcklqdq xmm1, xmm2
+        movdqa xmmword ptr [rsp + 64], xmm1
+        movq xmm0, qword ptr [rsp + 80]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        pshufd xmm0, xmm0, 0
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq xmm0, qword ptr [rsp + 88]
+        pshufd xmm2, xmm0, 225
+        paddw xmm2, xmm0
+        pshufd xmm3, xmm0, 85
+        pshufd xmm0, xmm0, 0
+        psubw xmm0, xmm3
+        punpckldq xmm2, xmm0
+        punpcklqdq xmm1, xmm2
+        movdqa xmmword ptr [rsp + 80], xmm1
+        movq xmm0, qword ptr [rsp + 96]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 96], xmm1
+        movq xmm0, qword ptr [rsp + 104]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 104], xmm1
+        movq xmm0, qword ptr [rsp + 112]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 112], xmm1
+        movq xmm0, qword ptr [rsp + 120]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 120], xmm1
+        movq xmm0, qword ptr [rsp + 128]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 128], xmm1
+        movq xmm0, qword ptr [rsp + 136]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 136], xmm1
+        movq xmm0, qword ptr [rsp + 144]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 144], xmm1
+        movq xmm0, qword ptr [rsp + 152]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 152], xmm1
+        movq xmm0, qword ptr [rsp + 160]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 160], xmm1
+        movq xmm0, qword ptr [rsp + 168]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 168], xmm1
+        movq xmm0, qword ptr [rsp + 176]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 176], xmm1
+        movq xmm0, qword ptr [rsp + 184]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 184], xmm1
+        movq xmm0, qword ptr [rsp + 192]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 192], xmm1
+        movq xmm0, qword ptr [rsp + 200]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 200], xmm1
+        movq xmm0, qword ptr [rsp + 208]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 208], xmm1
+        movq xmm0, qword ptr [rsp + 216]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 216], xmm1
+        movq xmm0, qword ptr [rsp + 224]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 224], xmm1
+        movq xmm0, qword ptr [rsp + 232]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 232], xmm1
+        movq xmm0, qword ptr [rsp + 240]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 240], xmm1
+        movq xmm0, qword ptr [rsp + 248]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 248], xmm1
+        movq xmm0, qword ptr [rsp + 256]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 256], xmm1
+        movq xmm0, qword ptr [rsp + 264]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 264], xmm1
+        movq xmm0, qword ptr [rsp + 272]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 272], xmm1
+        movq xmm0, qword ptr [rsp + 280]
+        pshufd xmm1, xmm0, 225
+        paddw xmm1, xmm0
+        pshufd xmm2, xmm0, 85
+        psubw xmm0, xmm2
+        punpckldq xmm1, xmm0
+        movq qword ptr [rsp + 280], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 32]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 32], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 48]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 48], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 64]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 64], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 80]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 80], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 96]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 96], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 112]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 112], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 128]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 128], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 144]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 144], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 160]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 160], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 176]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 176], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 192]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 192], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 208]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 208], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 224]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 224], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 240]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 240], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 256]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 256], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 272]
+        pshufd xmm1, xmm0, 78
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        psubw xmm1, xmm0
+        movsd xmm1, xmm2
+        movapd xmmword ptr [rsp + 272], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 32]
+        movdqa xmm1, xmmword ptr [rsp + 48]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 32], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 48], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 64]
+        movdqa xmm1, xmmword ptr [rsp + 80]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 64], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 80], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 96]
+        movdqa xmm1, xmmword ptr [rsp + 112]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 96], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 112], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 128]
+        movdqa xmm1, xmmword ptr [rsp + 144]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 128], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 144], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 160]
+        movdqa xmm1, xmmword ptr [rsp + 176]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 160], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 176], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 192]
+        movdqa xmm1, xmmword ptr [rsp + 208]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 192], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 208], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 224]
+        movdqa xmm1, xmmword ptr [rsp + 240]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 224], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 240], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 256]
+        movdqa xmm1, xmmword ptr [rsp + 272]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 256], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 272], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 32]
+        movdqa xmm1, xmmword ptr [rsp + 64]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 32], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 64], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 48]
+        movdqa xmm1, xmmword ptr [rsp + 80]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 48], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 80], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 96]
+        movdqa xmm1, xmmword ptr [rsp + 128]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 96], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 128], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 112]
+        movdqa xmm1, xmmword ptr [rsp + 144]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 112], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 144], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 160]
+        movdqa xmm1, xmmword ptr [rsp + 192]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 160], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 192], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 176]
+        movdqa xmm1, xmmword ptr [rsp + 208]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 176], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 208], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 224]
+        movdqa xmm1, xmmword ptr [rsp + 256]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 224], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 256], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 240]
+        movdqa xmm1, xmmword ptr [rsp + 272]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 240], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 272], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 32]
+        movdqa xmm1, xmmword ptr [rsp + 96]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 32], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 96], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 48]
+        movdqa xmm1, xmmword ptr [rsp + 112]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 48], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 112], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 64]
+        movdqa xmm1, xmmword ptr [rsp + 128]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 64], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 128], xmm0
+        movdqa xmm0, xmmword ptr [rsp + 80]
+        movdqa xmm1, xmmword ptr [rsp + 144]
+        movdqa xmm2, xmm1
+        paddw xmm2, xmm0
+        movdqa xmmword ptr [rsp + 80], xmm2
+        psubw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 144], xmm0
+        movdqa xmm1, xmmword ptr [rsp + 160]
+        movdqa xmm2, xmmword ptr [rsp + 224]
+        movdqa xmm0, xmm2
+        paddw xmm0, xmm1
+        movdqa xmmword ptr [rsp + 160], xmm0
+        psubw xmm1, xmm2
+        movdqa xmmword ptr [rsp + 224], xmm1
+        movdqa xmm1, xmmword ptr [rsp + 176]
+        movdqa xmm3, xmmword ptr [rsp + 240]
+        movdqa xmm2, xmm3
+        paddw xmm2, xmm1
+        movdqa xmmword ptr [rsp + 176], xmm2
+        psubw xmm1, xmm3
+        movdqa xmmword ptr [rsp + 240], xmm1
+        movdqa xmm3, xmmword ptr [rsp + 192]
+        movdqa xmm4, xmmword ptr [rsp + 256]
+        movdqa xmm1, xmm4
+        paddw xmm1, xmm3
+        movdqa xmmword ptr [rsp + 192], xmm1
+        psubw xmm3, xmm4
+        movdqa xmmword ptr [rsp + 256], xmm3
+        movdqa xmm3, xmmword ptr [rsp + 208]
+        movdqa xmm4, xmmword ptr [rsp + 272]
+        movdqa xmm5, xmm4
+        paddw xmm5, xmm3
+        movdqa xmmword ptr [rsp + 208], xmm5
+        psubw xmm3, xmm4
+        movdqa xmmword ptr [rsp + 272], xmm3
+        movdqa xmm3, xmmword ptr [rsp + 32]
+        movdqa xmm4, xmmword ptr [rsp + 48]
+        movdqa xmm6, xmm0
+        paddw xmm6, xmm3
+        movdqa xmm7, xmm2
+        paddw xmm7, xmm4
+        movdqa xmmword ptr [rsp + 32], xmm6
+        movdqa xmmword ptr [rsp + 48], xmm7
+        psubw xmm3, xmm0
+        psubw xmm4, xmm2
+        movdqa xmmword ptr [rsp + 160], xmm3
+        movdqa xmmword ptr [rsp + 176], xmm4
+        movdqa xmm0, xmmword ptr [rsp + 64]
+        movdqa xmm2, xmmword ptr [rsp + 80]
+        movdqa xmm3, xmm1
+        paddw xmm3, xmm0
+        movdqa xmm4, xmm5
+        paddw xmm4, xmm2
+        movdqa xmmword ptr [rsp + 64], xmm3
+        movdqa xmmword ptr [rsp + 80], xmm4
+        psubw xmm0, xmm1
+        psubw xmm2, xmm5
+        movdqa xmmword ptr [rsp + 192], xmm0
+        movdqa xmmword ptr [rsp + 208], xmm2
+        movdqa xmm0, xmmword ptr [rsp + 96]
+        movdqa xmm1, xmmword ptr [rsp + 112]
+        movdqa xmm2, xmmword ptr [rsp + 224]
+        movdqa xmm3, xmmword ptr [rsp + 240]
+        movdqa xmm4, xmm2
+        paddw xmm4, xmm0
+        movdqa xmm5, xmm3
+        paddw xmm5, xmm1
+        movdqa xmmword ptr [rsp + 96], xmm4
+        movdqa xmmword ptr [rsp + 112], xmm5
+        psubw xmm0, xmm2
+        psubw xmm1, xmm3
+        movdqa xmmword ptr [rsp + 224], xmm0
+        movdqa xmmword ptr [rsp + 240], xmm1
+        movdqa xmm0, xmmword ptr [rsp + 128]
+        movdqa xmm1, xmmword ptr [rsp + 144]
+        movdqa xmm2, xmmword ptr [rsp + 256]
+        movdqa xmm3, xmmword ptr [rsp + 272]
+        movdqa xmm4, xmm2
+        paddw xmm4, xmm0
+        movdqa xmm5, xmm3
+        paddw xmm5, xmm1
+        movdqa xmmword ptr [rsp + 128], xmm4
+        movdqa xmmword ptr [rsp + 144], xmm5
+        psubw xmm0, xmm2
+        psubw xmm1, xmm3
+        movdqa xmmword ptr [rsp + 256], xmm0
+        movdqa xmmword ptr [rsp + 272], xmm1
+        xor edi, edi
+        xor eax, eax
+        xor esi, esi
+        xor ebx, ebx
+        .p2align        4
+.LBB10_10:
+        mov ebp, esi
+        mov r12d, eax
+        movzx esi, word ptr [rsp + 2*rbx + 32]
+        .cv_inline_site_id 250 within 242 inlined_at 33 198 0
+        mov r15d, esi
+        neg r15w
+        cmovs r15w, si
+        .cv_inline_site_id 251 within 242 inlined_at 33 196 0
+        .cv_inline_site_id 252 within 251 inlined_at 32 850 0
+        lea r14, [rbx + 1]
+        shr esi, 15
+        cmp r15w, di
+        setg cl
+        .cv_inline_site_id 253 within 242 inlined_at 33 202 0
+        call subtle::black_box
+        .cv_inline_site_id 254 within 242 inlined_at 33 203 0
+        movzx ecx, al
+        mov eax, ecx
+        neg eax
+        .cv_inline_site_id 255 within 254 inlined_at 6 517 0
+        .cv_inline_site_id 256 within 255 inlined_at 5 50 0
+        xor r15d, edi
+        and r15d, eax
+        .cv_inline_site_id 257 within 255 inlined_at 5 28 0
+        xor r15d, edi
+        .cv_inline_site_id 258 within 242 inlined_at 33 204 0
+        neg cl
+        .cv_inline_site_id 259 within 258 inlined_at 6 517 0
+        .cv_inline_site_id 260 within 259 inlined_at 5 50 0
+        xor bl, r12b
+        and bl, cl
+        .cv_inline_site_id 261 within 259 inlined_at 5 28 0
+        mov eax, ebx
+        xor al, r12b
+        .cv_inline_site_id 262 within 242 inlined_at 33 205 0
+        .cv_inline_site_id 263 within 262 inlined_at 6 517 0
+        .cv_inline_site_id 264 within 263 inlined_at 5 50 0
+        xor sil, bpl
+        and sil, cl
+        .cv_inline_site_id 265 within 263 inlined_at 5 28 0
+        xor sil, bpl
+        mov edi, r15d
+        mov rbx, r14
+        .cv_inline_site_id 266 within 252 inlined_at 32 765 0
+        cmp r14, 128
+        jne .LBB10_10
+        shl sil, 7
+        or sil, al
+        mov eax, esi
+        movaps xmm6, xmmword ptr [rsp + 288]
+        movaps xmm7, xmmword ptr [rsp + 304]
+        .seh_startepilogue
+        add rsp, 320
+        pop rbx
+        pop rbp
+        pop rdi
+        pop rsi
+        pop r12
+        pop r14
+        pop r15
+        .seh_endepilogue
+        ret
+.LBB10_6:
+        lea r8, [rip + anon.5efb4c7bd5096631bce533be4b9842af.23]
+        call core::panicking::panic_bounds_check
+        int3

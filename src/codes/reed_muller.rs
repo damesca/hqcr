@@ -211,6 +211,20 @@ pub fn rm_decode(block: &[u8], multiplicity: usize) -> u8 {
     (best_neg << 7) | (best_idx & 0x7F)
 }
 
+// ── Constant-time audit: asm spot-check shim (Layer 3) ─────────────────────────
+//
+// `#[no_mangle] #[inline(never)]` so the argmax inside `rm_decode` keeps a
+// standalone symbol in `cargo asm` output. Compiled only under `--features
+// ct-audit`; no effect on a normal build. The audit reads it to confirm the
+// argmax updates are `cmov`/masking over a full 128-position scan (no early-exit
+// `jcc` on the secret `F̂` values). See docs/audit/constant-time.md §5.
+#[cfg(feature = "ct-audit")]
+#[no_mangle]
+#[inline(never)]
+pub fn ct_asm_rm_decode(block: &[u8]) -> u8 {
+    rm_decode(block, 3)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

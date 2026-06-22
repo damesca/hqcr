@@ -27,6 +27,10 @@ sha3      = "0.10"       # SHAKE256 KAT PRNG + raw reads in the intermediate-val
 # Run with: cargo test --features kat --test kat -- --nocapture
 kat = []
 
+# Enables the constant-time leakage harness in tests/ct_timing.rs (audit Layer 2).
+# Run with: cargo test --release --features ct-audit --test ct_timing -- --nocapture
+ct-audit = []
+
 [[bench]]
 name = "bench"
 harness = false
