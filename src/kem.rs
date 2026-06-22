@@ -42,7 +42,7 @@
 
 use rand_core::{CryptoRng, RngCore};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::hash::{self, SharedKey};
 use crate::params::{HqcParams, SALT_BYTES, SEED_BYTES, SHARED_KEY_BYTES};
@@ -85,7 +85,9 @@ impl<P: HqcParams> DecapsulationKey<P> {
         if bytes.len() != SEED_BYTES {
             return None;
         }
-        let mut seed = [0u8; SEED_BYTES];
+        // Wipe this secret-seed copy on the way out — it is the compressed
+        // secret key; `keygen_from_seed` only borrows it. (Zeroize audit G1.)
+        let mut seed = Zeroizing::new([0u8; SEED_BYTES]);
         seed.copy_from_slice(bytes);
         let (_, dk) = keygen_from_seed::<P>(&seed);
         Some(dk)
@@ -206,7 +208,7 @@ pub fn decaps<P: HqcParams>(dk: &DecapsulationKey<P>, c: &[u8]) -> SharedKey {
     let ek_hash = hash::h_ek(&ek_bytes);
 
     // Implicit-rejection key K̄ = J(H(ek), σ, c) — computed over the raw c.
-    let k_bar = hash::j(&ek_hash, &dk.sigma, c);
+    let mut k_bar = hash::j(&ek_hash, &dk.sigma, c);
 
     // A wrong-length ciphertext carries no secret; reject it up front with K̄.
     let (u, v, salt) = match parsing::unpack_ciphertext::<P>(c) {
@@ -222,7 +224,7 @@ pub fn decaps<P: HqcParams>(dk: &DecapsulationKey<P>, c: &[u8]) -> SharedKey {
         Zeroizing::new(m_prime.unwrap_or_else(|| vec![0u8; P::K]));
 
     // Re-derive (K', θ') and re-encrypt under the reused salt.
-    let (k_prime, theta) = hash::g(&ek_hash, &m_bytes, &salt);
+    let (mut k_prime, theta) = hash::g(&ek_hash, &m_bytes, &salt);
     let (u2, v2) = pke::encrypt::<P>(&dk.ek, &m_bytes, &theta[..]);
     let c_prime = parsing::pack_ciphertext::<P>(&u2, &v2, &salt);
 
@@ -230,7 +232,12 @@ pub fn decaps<P: HqcParams>(dk: &DecapsulationKey<P>, c: &[u8]) -> SharedKey {
     let reencrypt_ok = c_prime.as_slice().ct_eq(c);
     let valid = decode_ok & reencrypt_ok;
 
-    ct_select_key(&k_prime, &k_bar, valid)
+    // The selected key is the caller's to own; wipe the two stack key
+    // candidates before returning. (Zeroize audit G2.)
+    let shared = ct_select_key(&k_prime, &k_bar, valid);
+    k_prime.zeroize();
+    k_bar.zeroize();
+    shared
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

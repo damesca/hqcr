@@ -749,7 +749,7 @@ behavioural change, so `cargo test` and the KAT suite must still pass unchanged.
 | 17 | Karatsuba / SIMD `poly_mul` | ✅ done |
 | 18 | criterion benches | ✅ done |
 | 19a | Constant-time audit (manual + timing + asm/miri) | ✅ done (see `docs/audit/constant-time.md`) |
-| 19b | Zeroize audit | ⬜ roadmap written (see Step 19) |
+| 19b | Zeroize audit | ✅ done (see `docs/audit/zeroize.md`) |
 | 19c/d | lint, crate metadata | ⬜ deferred |
 
 ---
