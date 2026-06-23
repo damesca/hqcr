@@ -91,3 +91,28 @@ pub use hash::SharedKey;
 // `hqcr::kem::`.
 pub use kem::{DecapsulationKey, PublicKey};
 pub use kem::{decaps, encaps, encaps_deterministic, keygen, keygen_from_seed};
+
+// ── Zeroize audit: compile-time guard (19b, Layer 2) ──────────────────────────
+//
+// Trip-wire for the zeroize invariant (docs/audit/zeroize.md §5): if a secret
+// type ever loses its `#[derive(ZeroizeOnDrop)]`, the bound below fails to
+// compile. And because the derived `ZeroizeOnDrop` brings a `Drop` impl — which
+// Rust forbids alongside `Copy` — this also guarantees these types can never
+// silently become `Copy` (the bitwise-copy defeater). Test-only; no effect on a
+// normal build.
+#[cfg(test)]
+mod zeroize_guards {
+    use crate::params::{Hqc128, Hqc192, Hqc256};
+    use crate::pke::DecryptionKey;
+    use crate::poly::Poly;
+
+    fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+
+    #[test]
+    fn secret_types_are_zeroize_on_drop() {
+        assert_zeroize_on_drop::<Poly<Hqc128>>();
+        assert_zeroize_on_drop::<Poly<Hqc192>>();
+        assert_zeroize_on_drop::<Poly<Hqc256>>();
+        assert_zeroize_on_drop::<DecryptionKey>();
+    }
+}

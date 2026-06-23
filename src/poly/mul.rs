@@ -645,4 +645,20 @@ mod tests {
         let b256 = from_positions::<Hqc256>(&[0, 2]);
         let _ = mul_sparse_dense::<Hqc256>(&a256, &b256);
     }
+
+    // ── clmul64 known values (miri target for the pclmulqdq unsafe block) ──────
+
+    #[test]
+    fn clmul64_known_values() {
+        // Carry-less (GF(2)[X]) products — independent of which `clmul64` impl is
+        // selected, so the same test exercises the portable mask loop and, under
+        // `+pclmulqdq`, the `_mm_clmulepi64_si128` intrinsic. Small + fast, the
+        // ideal `cargo miri test` target for the crate's only `unsafe`.
+        assert_eq!(clmul64(0, 0), (0, 0));
+        assert_eq!(clmul64(1, 0xDEAD_BEEF), (0xDEAD_BEEF, 0)); // multiply by 1
+        assert_eq!(clmul64(2, 2), (4, 0)); // x · x = x^2
+        assert_eq!(clmul64(0b11, 0b11), (0b101, 0)); // (x+1)^2 = x^2 + 1 over GF(2)
+        assert_eq!(clmul64(1 << 63, 2), (0, 1)); // x^63 · x = x^64 → hi bit 0
+        assert_eq!(clmul64(u64::MAX, 1), (u64::MAX, 0));
+    }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "hqcr"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Pure-Rust implementation of HQC (Hamming Quasi-Cyclic) post-quantum KEM"
@@ -26,6 +26,10 @@ sha3      = "0.10"       # SHAKE256 KAT PRNG + raw reads in the intermediate-val
 # Enables the KAT generation/verification harness in tests/kat.rs.
 # Run with: cargo test --features kat --test kat -- --nocapture
 kat = []
+
+# Enables the constant-time leakage harness in tests/ct_timing.rs (audit Layer 2).
+# Run with: cargo test --release --features ct-audit --test ct_timing -- --nocapture
+ct-audit = []
 
 [[bench]]
 name = "bench"
