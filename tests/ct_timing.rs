@@ -77,7 +77,7 @@ use hqcr::hash;
 use hqcr::poly::mul::mul_dense_ct;
 use hqcr::poly::sampling::{sample_fixed_weight, sample_uniform};
 use hqcr::poly::Poly;
-use hqcr::{decaps, encaps_deterministic, keygen_from_seed};
+use hqcr::kem::{decaps, encaps_deterministic, keygen_from_seed};
 use hqcr::{Hqc128, HqcParams, SALT_BYTES, SEED_BYTES};
 
 // ── Tunables ──────────────────────────────────────────────────────────────────

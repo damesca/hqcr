@@ -16,8 +16,7 @@
 //! ## Quick start
 //!
 //! The high-level entry points are re-exported at the crate root: [`keygen`],
-//! [`encaps`], and [`decaps`] (plus the deterministic variants
-//! [`keygen_from_seed`] and [`encaps_deterministic`]). The shared secret is a
+//! [`encaps`], and [`decaps`]. The shared secret is a
 //! [`SharedKey`] (`[u8; 32]`).
 //!
 //! With your own CSPRNG (anything implementing `rand_core::{RngCore, CryptoRng}`,
@@ -42,11 +41,11 @@
 //!
 //! // In production, draw `seed`, `m`, and `salt` from a CSPRNG (see `keygen`).
 //! let seed = [0x42u8; hqcr::SEED_BYTES];
-//! let (ek, dk) = hqcr::keygen_from_seed::<Hqc128>(&seed);
+//! let (ek, dk) = hqcr::kem::keygen_from_seed::<Hqc128>(&seed);
 //!
 //! let m = [0x11u8; 16]; // Hqc128::K == 16 bytes
 //! let salt = [0x22u8; hqcr::SALT_BYTES];
-//! let (k_send, ct) = hqcr::encaps_deterministic::<Hqc128>(&ek, &m, &salt);
+//! let (k_send, ct) = hqcr::kem::encaps_deterministic::<Hqc128>(&ek, &m, &salt);
 //!
 //! let k_recv = hqcr::decaps::<Hqc128>(&dk, &ct);
 //! assert_eq!(k_send, k_recv);
@@ -90,7 +89,7 @@ pub use hash::SharedKey;
 // `hqcr::keygen` / `hqcr::encaps` / `hqcr::decaps` rather than reaching into
 // `hqcr::kem::`.
 pub use kem::{DecapsulationKey, PublicKey};
-pub use kem::{decaps, encaps, encaps_deterministic, keygen, keygen_from_seed};
+pub use kem::{decaps, encaps, keygen};
 
 // ── Zeroize audit: compile-time guard (19b, Layer 2) ──────────────────────────
 //

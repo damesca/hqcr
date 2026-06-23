@@ -22,7 +22,7 @@ use hqcr::hash;
 use hqcr::poly::mul::{mul_dense_ct, mul_sparse_dense};
 use hqcr::poly::sampling::{sample_fixed_weight, sample_uniform};
 use hqcr::poly::Poly;
-use hqcr::{decaps, encaps_deterministic, keygen_from_seed};
+use hqcr::kem::{decaps, encaps_deterministic, keygen_from_seed};
 use hqcr::{Hqc128, Hqc192, Hqc256, HqcParams, SALT_BYTES, SEED_BYTES};
 
 /// Build a deterministic dense (uniform) and sparse (weight-ω) operand pair for
