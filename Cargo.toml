@@ -25,6 +25,7 @@ rand_core = "0.6"
 criterion = "0.5"
 hex       = "0.4"
 sha3      = "0.10"       # SHAKE256 KAT PRNG + raw reads in the intermediate-values harness (test-only)
+rand_core = { version = "0.6", features = ["getrandom"] }  # OsRng for examples
 
 [features]
 # Enables the KAT generation/verification harness in tests/kat.rs.
