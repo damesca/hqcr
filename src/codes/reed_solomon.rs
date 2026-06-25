@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn decode_beyond_capacity_returns_none() {
-        for &(n1, k, delta) in &[S1, S3] {
+        for &(n1, k, delta) in &[S1, S2, S3] {
             let msg: Vec<u8> = (0..k as u8).collect();
             let mut cw = encode(&msg, n1, delta);
             // δ+1 errors at distinct positions.
@@ -441,6 +441,33 @@ mod tests {
                 rs_decode(&cw, k, delta).is_none(),
                 "delta={delta}: δ+1 errors must be uncorrectable"
             );
+        }
+    }
+
+    // ── Errors spanning both parity and message regions ──────────────────────
+
+    #[test]
+    fn decode_errors_in_both_regions() {
+        // δ errors split: half in parity [0, nk), half in message [nk, n1).
+        // Verifies the correction step applies correctly regardless of region.
+        for &(n1, k, delta) in &[S1, S2, S3] {
+            let nk = 2 * delta;
+            let msg: Vec<u8> = (0..k as u8).map(|i| i.wrapping_mul(5).wrapping_add(3)).collect();
+            let mut cw = encode(&msg, n1, delta);
+
+            let half = delta / 2;
+            let mut errors = Vec::new();
+            for i in 0..half {
+                errors.push((i, 0x55u8 | 1)); // parity region
+            }
+            for i in 0..(delta - half) {
+                errors.push((nk + i, 0xAAu8 | 1)); // message region
+            }
+            inject_errors(&mut cw, &errors);
+
+            let recovered = rs_decode(&cw, k, delta)
+                .unwrap_or_else(|| panic!("should correct {delta} mixed-region errors (delta={delta})"));
+            assert_eq!(recovered, msg, "delta={delta}");
         }
     }
 

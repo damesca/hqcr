@@ -265,6 +265,17 @@ mod tests {
     }
 
     #[test]
+    fn keygen_different_seeds_differ() {
+        let seed1 = [0x5Au8; SEED_BYTES];
+        let mut seed2 = seed1;
+        seed2[0] ^= 1;
+        let (ek1, _) = keygen::<Hqc128>(&seed1);
+        let (ek2, _) = keygen::<Hqc128>(&seed2);
+        assert_ne!(ek1.seed_ek, ek2.seed_ek);
+        assert_ne!(ek1.s, ek2.s);
+    }
+
+    #[test]
     fn encrypt_is_deterministic() {
         let (ek, _dk) = keygen::<Hqc128>(&[1u8; SEED_BYTES]);
         let m = test_msg::<Hqc128>();
@@ -299,15 +310,51 @@ mod tests {
         }
     }
 
-    // ── EncryptionKey byte round-trip ─────────────────────────────────────────
+    fn check_v_tail_is_zero<P: HqcParams>() {
+        let (ek, _dk) = keygen::<P>(&[3u8; SEED_BYTES]);
+        let (_, v) = encrypt::<P>(&ek, &test_msg::<P>(), &[4u8; 32]);
+        for i in (P::N1 * P::N2)..P::N {
+            assert_eq!(v.get_bit(i), 0, "v bit {i} above codeword must be zero");
+        }
+    }
 
     #[test]
-    fn encryption_key_byte_roundtrip() {
-        let (ek, _dk) = keygen::<Hqc192>(&[7u8; SEED_BYTES]);
+    fn encrypt_v_tail_is_zero_192() {
+        check_v_tail_is_zero::<Hqc192>();
+    }
+    #[test]
+    fn encrypt_v_tail_is_zero_256() {
+        check_v_tail_is_zero::<Hqc256>();
+    }
+
+    // ── EncryptionKey byte round-trip ─────────────────────────────────────────
+
+    fn check_encryption_key_byte_roundtrip<P: HqcParams>() {
+        let (ek, _dk) = keygen::<P>(&[7u8; SEED_BYTES]);
         let bytes = ek.to_bytes();
-        assert_eq!(bytes.len(), Hqc192::PK_BYTES);
-        let back = EncryptionKey::<Hqc192>::from_bytes(&bytes).expect("valid length");
+        assert_eq!(bytes.len(), P::PK_BYTES);
+        let back = EncryptionKey::<P>::from_bytes(&bytes).expect("valid length");
         assert_eq!(back.seed_ek, ek.seed_ek);
         assert_eq!(back.s, ek.s);
+    }
+
+    #[test]
+    fn encryption_key_byte_roundtrip_128() {
+        check_encryption_key_byte_roundtrip::<Hqc128>();
+    }
+    #[test]
+    fn encryption_key_byte_roundtrip_192() {
+        check_encryption_key_byte_roundtrip::<Hqc192>();
+    }
+    #[test]
+    fn encryption_key_byte_roundtrip_256() {
+        check_encryption_key_byte_roundtrip::<Hqc256>();
+    }
+
+    #[test]
+    fn encryption_key_from_bytes_rejects_bad_length() {
+        assert!(EncryptionKey::<Hqc128>::from_bytes(&[]).is_none());
+        assert!(EncryptionKey::<Hqc128>::from_bytes(&vec![0u8; Hqc128::PK_BYTES - 1]).is_none());
+        assert!(EncryptionKey::<Hqc128>::from_bytes(&vec![0u8; Hqc128::PK_BYTES + 1]).is_none());
     }
 }

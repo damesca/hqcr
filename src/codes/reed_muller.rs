@@ -235,19 +235,6 @@ mod tests {
     }
 
     #[test]
-    fn encode_255_gives_all_ones() {
-        // m=0xFF: bit 7 set → start from all-ones; bits 0..6 all set → XOR stripes
-        // net result: all bits become parity(0xFF & i) = popcount(i) mod 2.
-        // Actually for m=0xFF all bits are set so codeword[i] = popcount(0xFF & i) mod 2.
-        // This is not all-ones; just check round-trip below instead.
-        let buf = encode_byte_to_vec(0xFF, 3);
-        assert_eq!(buf.len(), 48);
-        // Each copy is identical.
-        assert_eq!(&buf[0..16], &buf[16..32]);
-        assert_eq!(&buf[0..16], &buf[32..48]);
-    }
-
-    #[test]
     fn encode_duplicates_are_identical() {
         for m in [0u8, 1, 42, 128, 255] {
             for mult in [3usize, 5] {
@@ -343,6 +330,36 @@ mod tests {
             let decoded = rm_decode(&buf, 3);
             assert_eq!(decoded, m, "single bit flip at pos={pos}");
         }
+    }
+
+    #[test]
+    fn decode_single_bit_error_each_position_mult5() {
+        // Same sweep for ×5 (640-bit codeword, used in HQC-192/256).
+        let m = 0x55u8;
+        let clean = encode_byte_to_vec(m, 5);
+        for pos in 0..640 {
+            let mut buf = clean.clone();
+            flip_bit(&mut buf, pos);
+            let decoded = rm_decode(&buf, 5);
+            assert_eq!(decoded, m, "single bit flip at pos={pos}");
+        }
+    }
+
+    #[test]
+    fn decode_tie_break_picks_lowest_index() {
+        // Feed codeword(m) ++ complement(codeword(m)) to rm_decode with mult=2.
+        // For every bit position i:
+        //   F[i] = (1 - 2*cw[i]) + (1 - 2*(1-cw[i])) = 0
+        // WHT(0) = 0 → all 128 positions tie at |0|. The argmax scan never
+        // updates from its initial state (best_abs=0, best_idx=0, best_neg=0),
+        // so the function must return byte 0 (the smallest index).
+        let [lo, hi] = rm_encode_byte(0x42);
+        let mut buf = vec![0u8; 32]; // 2 copies × 16 bytes
+        buf[0..8].copy_from_slice(&lo.to_le_bytes());
+        buf[8..16].copy_from_slice(&hi.to_le_bytes());
+        buf[16..24].copy_from_slice(&(!lo).to_le_bytes());
+        buf[24..32].copy_from_slice(&(!hi).to_le_bytes());
+        assert_eq!(rm_decode(&buf, 2), 0, "all-zero WHT must pick index 0");
     }
 
     // ── WHT properties ────────────────────────────────────────────────────────

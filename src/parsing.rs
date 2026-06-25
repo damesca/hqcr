@@ -209,6 +209,27 @@ mod tests {
         assert_eq!(ct.len(), Hqc128::CT_BYTES);
     }
 
+    fn check_lengths<P: HqcParams>(expected_pk: usize, expected_ct: usize) {
+        assert_eq!(ring_bytes::<P>(), (P::N + 7) / 8);
+        assert_eq!(ring_to_bytes(&Poly::<P>::zero()).len(), (P::N + 7) / 8);
+        assert_eq!(v_to_bytes(&Poly::<P>::zero()).len(), P::N1 * P::N2 / 8);
+        let pk = pack_public_key::<P>(&[0u8; SEED_BYTES], &Poly::zero());
+        assert_eq!(pk.len(), P::PK_BYTES);
+        assert_eq!(pk.len(), expected_pk);
+        let ct = pack_ciphertext::<P>(&Poly::zero(), &Poly::zero(), &[0u8; SALT_BYTES]);
+        assert_eq!(ct.len(), P::CT_BYTES);
+        assert_eq!(ct.len(), expected_ct);
+    }
+
+    #[test]
+    fn lengths_match_params_192() {
+        check_lengths::<Hqc192>(4514, 8978);
+    }
+    #[test]
+    fn lengths_match_params_256() {
+        check_lengths::<Hqc256>(7237, 14421);
+    }
+
     // ── Ring element round-trips for all three parameter sets ─────────────────
 
     fn ring_roundtrip<P: HqcParams>() {
@@ -255,6 +276,34 @@ mod tests {
         v_roundtrip::<Hqc256>();
     }
 
+    // ── v ring-tail bits (N1*N2 .. N-1) must not appear in v serialization ──────
+
+    fn check_v_drops_ring_tail<P: HqcParams>() {
+        // N1*N2 < N for all parameter sets; the gap is the ring tail that v drops.
+        let tail_bit = P::N1 * P::N2;
+        let base = patterned_poly::<P>(91, P::N1 * P::N2);
+        let mut with_tail = base.clone();
+        with_tail.set_bit(tail_bit);
+        assert_eq!(
+            v_to_bytes(&base),
+            v_to_bytes(&with_tail),
+            "ring-tail bit {tail_bit} must not appear in v serialization"
+        );
+    }
+
+    #[test]
+    fn v_drops_ring_tail_128() {
+        check_v_drops_ring_tail::<Hqc128>();
+    }
+    #[test]
+    fn v_drops_ring_tail_192() {
+        check_v_drops_ring_tail::<Hqc192>();
+    }
+    #[test]
+    fn v_drops_ring_tail_256() {
+        check_v_drops_ring_tail::<Hqc256>();
+    }
+
     // ── Partial final byte: high bits beyond N must be zero / masked ───────────
 
     #[test]
@@ -272,6 +321,24 @@ mod tests {
         );
     }
 
+    fn check_final_byte_high_bits_zero<P: HqcParams>() {
+        let rem = P::N % 8;
+        assert_ne!(rem, 0, "this test assumes N is not byte-aligned");
+        let p = patterned_poly::<P>(3, P::N);
+        let bytes = ring_to_bytes(&p);
+        let last = *bytes.last().unwrap();
+        assert_eq!(last & !((1u8 << rem) - 1), 0, "high bits of final byte must be zero");
+    }
+
+    #[test]
+    fn final_byte_high_bits_are_zero_192() {
+        check_final_byte_high_bits_zero::<Hqc192>();
+    }
+    #[test]
+    fn final_byte_high_bits_are_zero_256() {
+        check_final_byte_high_bits_zero::<Hqc256>();
+    }
+
     #[test]
     fn unpack_masks_stray_high_bits() {
         // Craft a ring buffer whose final byte has stray bits set above N%8.
@@ -282,6 +349,24 @@ mod tests {
         // Re-packing must drop the stray bits, proving they never entered the Poly.
         let repacked = ring_to_bytes(&p);
         assert_eq!(repacked.last().unwrap() & !((1u8 << rem) - 1), 0);
+    }
+
+    fn check_unpack_masks_stray<P: HqcParams>() {
+        let mut bytes = ring_to_bytes(&patterned_poly::<P>(53, P::N));
+        let rem = P::N % 8;
+        *bytes.last_mut().unwrap() |= !((1u8 << rem) - 1);
+        let p = ring_from_bytes::<P>(&bytes);
+        let repacked = ring_to_bytes(&p);
+        assert_eq!(repacked.last().unwrap() & !((1u8 << rem) - 1), 0);
+    }
+
+    #[test]
+    fn unpack_masks_stray_high_bits_192() {
+        check_unpack_masks_stray::<Hqc192>();
+    }
+    #[test]
+    fn unpack_masks_stray_high_bits_256() {
+        check_unpack_masks_stray::<Hqc256>();
     }
 
     // ── Composite round-trips ─────────────────────────────────────────────────

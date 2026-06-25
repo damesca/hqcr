@@ -141,14 +141,25 @@ mod tests {
 
     // ── Codeword occupies exactly the low n1*N2 bits ──────────────────────────
 
-    #[test]
-    fn codeword_fits_in_ring_with_zero_tail() {
-        // The trailing ℓ = N - n1*N2 bits must be zero.
-        let msg = test_msg::<Hqc128>();
-        let cw = encode::<Hqc128>(&msg);
-        for i in (Hqc128::N1 * Hqc128::N2)..Hqc128::N {
+    fn zero_tail<P: HqcParams>() {
+        let msg = test_msg::<P>();
+        let cw = encode::<P>(&msg);
+        for i in (P::N1 * P::N2)..P::N {
             assert_eq!(cw.get_bit(i), 0, "trailing bit {i} must be zero");
         }
+    }
+
+    #[test]
+    fn codeword_fits_in_ring_with_zero_tail_128() {
+        zero_tail::<Hqc128>();
+    }
+    #[test]
+    fn codeword_fits_in_ring_with_zero_tail_192() {
+        zero_tail::<Hqc192>();
+    }
+    #[test]
+    fn codeword_fits_in_ring_with_zero_tail_256() {
+        zero_tail::<Hqc256>();
     }
 
     // ── A few bit errors within RM capacity per block → recovers ──────────────
@@ -216,5 +227,36 @@ mod tests {
     #[test]
     fn roundtrip_delta_symbol_errors_256() {
         roundtrip_delta_symbol_errors::<Hqc256>();
+    }
+
+    // ── δ+1 fully-corrupted blocks → RS cannot correct → None ─────────────────
+
+    fn decode_fails_on_delta_plus_one_errors<P: HqcParams>() {
+        // Complement every bit of δ+1 blocks, giving δ+1 wrong RS symbols.
+        // RS can correct at most δ errors, so decode must return None.
+        let msg = test_msg::<P>();
+        let mut cw = encode::<P>(&msg);
+        for j in 0..=P::DELTA {
+            for b in 0..P::N2 {
+                flip_bit::<P>(&mut cw, j * P::N2 + b);
+            }
+        }
+        assert!(
+            decode::<P>(&cw).is_none(),
+            "decode must return None with δ+1 symbol errors"
+        );
+    }
+
+    #[test]
+    fn decode_fails_on_delta_plus_one_errors_128() {
+        decode_fails_on_delta_plus_one_errors::<Hqc128>();
+    }
+    #[test]
+    fn decode_fails_on_delta_plus_one_errors_192() {
+        decode_fails_on_delta_plus_one_errors::<Hqc192>();
+    }
+    #[test]
+    fn decode_fails_on_delta_plus_one_errors_256() {
+        decode_fails_on_delta_plus_one_errors::<Hqc256>();
     }
 }

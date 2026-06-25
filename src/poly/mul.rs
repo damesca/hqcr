@@ -352,6 +352,10 @@ mod tests {
         assert_eq!(r.hamming_weight(), 0);
         let r2 = mul_sparse_dense::<Hqc128>(&a, &zero);
         assert_eq!(r2.hamming_weight(), 0);
+        let r3 = mul_dense_ct::<Hqc128>(&zero, &a);
+        assert_eq!(r3.hamming_weight(), 0);
+        let r4 = mul_dense_ct::<Hqc128>(&a, &zero);
+        assert_eq!(r4.hamming_weight(), 0);
     }
 
     #[test]
@@ -366,6 +370,10 @@ mod tests {
         assert_eq!(r, a);
         let r2 = mul_sparse_dense::<Hqc128>(&a, &one);
         assert_eq!(r2, a);
+        let r3 = mul_dense_ct::<Hqc128>(&one, &a);
+        assert_eq!(r3, a);
+        let r4 = mul_dense_ct::<Hqc128>(&a, &one);
+        assert_eq!(r4, a);
     }
 
     #[test]
@@ -382,6 +390,8 @@ mod tests {
         assert_eq!(r.get_bit(101), 1);
         assert_eq!(r.get_bit(0), 1, "X^(N-1) * X should wrap to bit 0");
         assert_eq!(r.hamming_weight(), 3);
+        let r_b = mul_dense_ct::<Hqc128>(&x, &a);
+        assert_eq!(r_b, r, "Mode B must agree with Mode A for cyclic shift");
     }
 
     // ── Absolute correctness vs naive cyclic convolution ─────────────────────
@@ -474,6 +484,34 @@ mod tests {
 
             let ab = mul_sparse_dense::<Hqc128>(&a, &b);
             let ba = mul_sparse_dense::<Hqc128>(&b, &a);
+            assert_eq!(ab, ba, "commutativity failed for seed={seed}");
+        }
+    }
+
+    #[test]
+    fn sparse_dense_commutativity_hqc192() {
+        use crate::poly::sampling::sample_fixed_weight;
+        use sha3::{
+            digest::{ExtendableOutput, Update},
+            Shake256,
+        };
+
+        for seed in 0u8..5 {
+            let mut xof = {
+                let mut h = Shake256::default();
+                h.update(&[seed, 0]);
+                h.finalize_xof()
+            };
+            let a = sample_fixed_weight::<Hqc192>(&mut xof, Hqc192::OMEGA);
+            let mut xof2 = {
+                let mut h = Shake256::default();
+                h.update(&[seed, 1]);
+                h.finalize_xof()
+            };
+            let b = sample_fixed_weight::<Hqc192>(&mut xof2, Hqc192::OMEGA_R);
+
+            let ab = mul_sparse_dense::<Hqc192>(&a, &b);
+            let ba = mul_sparse_dense::<Hqc192>(&b, &a);
             assert_eq!(ab, ba, "commutativity failed for seed={seed}");
         }
     }
@@ -650,25 +688,14 @@ mod tests {
         assert_eq!(
             r.words[Hqc128::N_WORDS - 1] & !mask,
             0,
-            "overflow bits not cleared by reduce()"
+            "Mode A: overflow bits not cleared"
         );
-    }
-
-    // ── Parameter set compilation checks ─────────────────────────────────────
-
-    #[test]
-    fn all_three_param_sets_mul() {
-        let a128 = from_positions::<Hqc128>(&[0, 1]);
-        let b128 = from_positions::<Hqc128>(&[0, 2]);
-        let _ = mul_sparse_dense::<Hqc128>(&a128, &b128);
-
-        let a192 = from_positions::<Hqc192>(&[0, 1]);
-        let b192 = from_positions::<Hqc192>(&[0, 2]);
-        let _ = mul_sparse_dense::<Hqc192>(&a192, &b192);
-
-        let a256 = from_positions::<Hqc256>(&[0, 1]);
-        let b256 = from_positions::<Hqc256>(&[0, 2]);
-        let _ = mul_sparse_dense::<Hqc256>(&a256, &b256);
+        let r_b = mul_dense_ct::<Hqc128>(&a, &b);
+        assert_eq!(
+            r_b.words[Hqc128::N_WORDS - 1] & !mask,
+            0,
+            "Mode B: overflow bits not cleared by reduce_wide()"
+        );
     }
 
     // ── clmul64 known values (miri target for the pclmulqdq unsafe block) ──────

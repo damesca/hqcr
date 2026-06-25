@@ -353,6 +353,16 @@ mod tests {
     }
 
     #[test]
+    fn keygen_different_seeds_differ() {
+        let seed1 = [0x5Au8; SEED_BYTES];
+        let mut seed2 = seed1;
+        seed2[0] ^= 1;
+        let (ek1, _) = keygen_from_seed::<Hqc128>(&seed1);
+        let (ek2, _) = keygen_from_seed::<Hqc128>(&seed2);
+        assert_ne!(ek1.seed_ek, ek2.seed_ek);
+    }
+
+    #[test]
     fn encaps_is_deterministic() {
         let (ek, _dk) = keygen_from_seed::<Hqc128>(&[1u8; SEED_BYTES]);
         let m = vec![3u8; Hqc128::K];
@@ -417,6 +427,21 @@ mod tests {
         // They are J over the respective c, so empty vs truncated differ.
         assert_ne!(k0, k1);
         assert_ne!(k1, k2);
+    }
+
+    // ── Valid-format all-zeros ciphertext takes the "decode ok, re-encrypt fails" path ──
+    // Distinct from the bad-length case (which rejects at parse) and the tampered-bit
+    // case (which may fail at decode). Here decode succeeds (C.Decode(0) = zeros) but
+    // re-encrypting zeros under fresh randomness never reproduces the all-zeros wire.
+
+    #[test]
+    fn decaps_all_zeros_valid_length_is_rejection() {
+        let (ek, dk) = keygen_from_seed::<Hqc128>(&[0x42u8; SEED_BYTES]);
+        let all_zeros = vec![0u8; Hqc128::CT_BYTES];
+        let k = decaps::<Hqc128>(&dk, &all_zeros);
+        let ek_hash = hash::h_ek(&ek.to_bytes());
+        let expected = hash::j(&ek_hash, &dk.sigma, &all_zeros);
+        assert_eq!(k, expected, "all-zeros ciphertext must yield the J-based rejection key");
     }
 
     // ── Compressed secret key round-trip reproduces decaps behavior ───────────

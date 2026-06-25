@@ -289,28 +289,25 @@ mod tests {
         assert_eq!(p.hamming_weight(), Hqc256::OMEGA);
     }
 
-    #[test]
-    fn fixed_weight_all_bits_in_range() {
-        let mut xof = make_xof(b"test-seed-range");
-        let p = sample_fixed_weight::<Hqc128>(&mut xof, Hqc128::OMEGA_R);
-        // Every set bit must be in [0, N).
-        for i in 0..Hqc128::N {
-            let _ = p.get_bit(i); // panics if out of range in debug mode
-        }
-        // No bits set in overflow region.
-        let last_bit = Hqc128::N & 63;
+    fn check_fixed_weight_bits_in_range<P: HqcParams>(seed: &[u8]) {
+        let mut xof = make_xof(seed);
+        let p = sample_fixed_weight::<P>(&mut xof, P::OMEGA_R);
+        let last_bit = P::N & 63;
         let mask = (1u64 << last_bit) - 1;
-        assert_eq!(p.words[Hqc128::N_WORDS - 1] & !mask, 0);
+        assert_eq!(p.words[P::N_WORDS - 1] & !mask, 0, "no overflow bits");
     }
 
     #[test]
-    fn fixed_weight_no_duplicates() {
-        // With weight 1, sample many times and verify we always get exactly 1 bit set.
-        for seed in 0u8..20 {
-            let mut xof = make_xof(&[seed]);
-            let p = sample_fixed_weight::<Hqc128>(&mut xof, 1);
-            assert_eq!(p.hamming_weight(), 1, "seed={seed}");
-        }
+    fn fixed_weight_all_bits_in_range_128() {
+        check_fixed_weight_bits_in_range::<Hqc128>(b"test-seed-range");
+    }
+    #[test]
+    fn fixed_weight_all_bits_in_range_192() {
+        check_fixed_weight_bits_in_range::<Hqc192>(b"test-seed-range-192");
+    }
+    #[test]
+    fn fixed_weight_all_bits_in_range_256() {
+        check_fixed_weight_bits_in_range::<Hqc256>(b"test-seed-range-256");
     }
 
     #[test]
@@ -465,17 +462,25 @@ mod tests {
 
     // ── uniform sampler ───────────────────────────────────────────────────────
 
-    #[test]
-    fn uniform_no_overflow_bits() {
-        let mut xof = make_xof(b"uniform-test");
-        let p = sample_uniform::<Hqc128>(&mut xof);
-        let last_bit = Hqc128::N & 63;
+    fn check_uniform_no_overflow<P: HqcParams>(seed: &[u8]) {
+        let mut xof = make_xof(seed);
+        let p = sample_uniform::<P>(&mut xof);
+        let last_bit = P::N & 63;
         let mask = (1u64 << last_bit) - 1;
-        assert_eq!(
-            p.words[Hqc128::N_WORDS - 1] & !mask,
-            0,
-            "bits above N-1 must be zero"
-        );
+        assert_eq!(p.words[P::N_WORDS - 1] & !mask, 0, "no overflow bits");
+    }
+
+    #[test]
+    fn uniform_no_overflow_bits_128() {
+        check_uniform_no_overflow::<Hqc128>(b"uniform-test");
+    }
+    #[test]
+    fn uniform_no_overflow_bits_192() {
+        check_uniform_no_overflow::<Hqc192>(b"uniform-192");
+    }
+    #[test]
+    fn uniform_no_overflow_bits_256() {
+        check_uniform_no_overflow::<Hqc256>(b"uniform-256");
     }
 
     #[test]
@@ -485,14 +490,5 @@ mod tests {
         let p1 = sample_uniform::<Hqc128>(&mut xof1);
         let p2 = sample_uniform::<Hqc128>(&mut xof2);
         assert_eq!(p1, p2);
-    }
-
-    #[test]
-    fn uniform_256_no_overflow() {
-        let mut xof = make_xof(b"uniform-256");
-        let p = sample_uniform::<Hqc256>(&mut xof);
-        let last_bit = Hqc256::N & 63;
-        let mask = (1u64 << last_bit) - 1;
-        assert_eq!(p.words[Hqc256::N_WORDS - 1] & !mask, 0);
     }
 }

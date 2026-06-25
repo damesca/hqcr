@@ -232,6 +232,16 @@ mod tests {
     }
 
     #[test]
+    fn add_self_cancels() {
+        // p + p = 0 in GF(2) — every element is its own additive inverse.
+        let mut p = Poly::<Hqc128>::zero();
+        p.set_bit(0);
+        p.set_bit(100);
+        p.set_bit(Hqc128::N - 1);
+        assert_eq!(p.add(&p), Poly::<Hqc128>::zero());
+    }
+
+    #[test]
     fn reduce_folds_overflow() {
         // For Hqc128: N = 17669, N_WORDS = 277.
         // 277 * 64 = 17728. Overflow region: bits 17669..17728 (59 bits).
@@ -245,47 +255,49 @@ mod tests {
         assert_eq!(p.words[276] >> 5, 0, "overflow cleared after reduce");
     }
 
+    fn check_reduce_folds_multiple_overflow<P: HqcParams>() {
+        // Set two consecutive overflow bits (N and N+1) in the last word.
+        // Both must fold back to positions 0 and 1 respectively.
+        let last_bit = P::N & 63;
+        assert!(last_bit < 63, "need room for two overflow bits in last word");
+        let last_idx = P::N_WORDS - 1;
+
+        let mut p = Poly::<P>::zero();
+        p.words[last_idx] |= 1u64 << last_bit;        // bit N   → folds to bit 0
+        p.words[last_idx] |= 1u64 << (last_bit + 1);  // bit N+1 → folds to bit 1
+        p.reduce();
+
+        assert_eq!(p.get_bit(0), 1, "bit N must fold to bit 0");
+        assert_eq!(p.get_bit(1), 1, "bit N+1 must fold to bit 1");
+        assert_eq!(p.words[last_idx] >> last_bit, 0, "overflow must be cleared after reduce");
+    }
+
+    #[test]
+    fn reduce_folds_multiple_overflow_bits_128() {
+        check_reduce_folds_multiple_overflow::<Hqc128>();
+    }
+    #[test]
+    fn reduce_folds_multiple_overflow_bits_192() {
+        check_reduce_folds_multiple_overflow::<Hqc192>();
+    }
+    #[test]
+    fn reduce_folds_multiple_overflow_bits_256() {
+        check_reduce_folds_multiple_overflow::<Hqc256>();
+    }
+
     #[test]
     fn reduce_is_idempotent() {
-        let mut p = Poly::<Hqc256>::zero();
-        p.set_bit(1000);
-        p.set_bit(50000);
-        p.reduce(); // should be no-op since bits are in range
-        let w_before = p.hamming_weight();
-        p.reduce();
-        assert_eq!(p.hamming_weight(), w_before);
-    }
-
-    #[test]
-    fn hamming_weight_counts_only_active_bits() {
+        // Set an overflow bit, reduce to fold it, then confirm a second
+        // reduce is a no-op (no overflow remains, poly stays unchanged).
         let mut p = Poly::<Hqc128>::zero();
-        // Manually set a padding bit (above N) and verify it's not counted.
-        // N_WORDS * 64 - N = 277*64 - 17669 = 17728 - 17669 = 59 padding bits.
-        // We intentionally bypass set_bit (which would panic) to write raw:
-        p.words[Hqc128::N_WORDS - 1] = u64::MAX; // includes overflow bits
-                                                 // hamming_weight sums all N_WORDS words — so it WILL count overflow.
-                                                 // This test verifies the caller (mul.rs / sampling.rs) always calls
-                                                 // reduce() before hamming_weight(), OR that hamming_weight is only
-                                                 // called on valid (reduced) polys. Document the contract here:
-                                                 // hamming_weight counts N_WORDS words, caller must ensure upper bits = 0.
-        let raw_count = p.hamming_weight();
-        assert_eq!(raw_count, 64); // full word = 64 set bits
-                                   // After mask:
-        p.reduce();
-        // reduce only folds if there's overflow, but doesn't zero them out for
-        // a fully-set last word — let's check the actual contract.
-        // Actually reduce zeros the overflow bits in the last word and XORs into
-        // words[0]. words[0] was 0, so words[0] becomes the overflow bits.
-        // overflow = words[276] >> 5  (59 bits all set = 0x7FFFFFFFFFFFFFFF >> (64-59))
-        // This test is more of a documentation test — just ensure no panic.
-        let _ = p.hamming_weight();
-    }
+        p.words[Hqc128::N_WORDS - 1] |= 1u64 << (Hqc128::N & 63); // bit N
+        p.reduce(); // folds bit N to bit 0
+        assert_eq!(p.get_bit(0), 1, "bit N should fold to bit 0");
 
-    #[test]
-    fn all_three_param_sets_compile() {
-        let _a = Poly::<Hqc128>::zero();
-        let _b = Poly::<Hqc192>::zero();
-        let _c = Poly::<Hqc256>::zero();
+        let weight_before = p.hamming_weight();
+        p.reduce(); // second reduce: no overflow, must be a no-op
+        assert_eq!(p.hamming_weight(), weight_before);
+        assert_eq!(p.get_bit(0), 1, "bit 0 must remain set after second reduce");
     }
 
     #[test]

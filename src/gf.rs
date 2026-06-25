@@ -174,4 +174,66 @@ mod tests {
             assert_eq!(lhs, rhs, "a={a:#04x} b={b:#04x} c={c:#04x}");
         }
     }
+
+    // ── gf_div ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn gf_div_zero_numerator() {
+        for b in 1u8..=255 {
+            assert_eq!(gf_div(0, b), 0, "b={b}");
+        }
+    }
+
+    #[test]
+    fn gf_div_self_is_one() {
+        for x in 1u8..=255 {
+            assert_eq!(gf_div(x, x), 1, "x={x}");
+        }
+    }
+
+    #[test]
+    fn gf_div_by_one_is_identity() {
+        for x in 0u8..=255 {
+            assert_eq!(gf_div(x, 1), x, "x={x}");
+        }
+    }
+
+    // ── gf_poly_eval ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn poly_eval_at_zero_is_constant_term() {
+        // p(0) = p[0] regardless of higher-degree coefficients (all x^k terms vanish).
+        for c in [0u8, 1, 0x42, 0xFF] {
+            assert_eq!(gf_poly_eval(&[c], 0), c);
+            assert_eq!(gf_poly_eval(&[c, 0x11, 0xAB], 0), c);
+        }
+    }
+
+    #[test]
+    fn poly_eval_linear() {
+        // p(x) = a + b·x → evaluates to gf_add(a, gf_mul(b, x)).
+        let cases = [(0u8, 1u8, 2u8), (0x53, 0xCA, 0x7F), (1, 0, 5), (0, 1, 255)];
+        for (a, b, x) in cases {
+            assert_eq!(
+                gf_poly_eval(&[a, b], x),
+                gf_add(a, gf_mul(b, x)),
+                "a={a} b={b} x={x}"
+            );
+        }
+    }
+
+    #[test]
+    fn poly_eval_known_value() {
+        // p(x) = 1 + x + x^2, little-endian coefficients [1, 1, 1].
+        // p(α) = 1 XOR α XOR α^2 = 1 XOR 2 XOR 4 = 7.
+        assert_eq!(gf_poly_eval(&[1, 1, 1], GF_EXP[1]), 7);
+    }
+
+    #[test]
+    fn poly_eval_root() {
+        // (x + α) has coefficients [α, 1] (constant=α, linear=1) in little-endian.
+        // In char 2 this equals (x − α), so α must be a root: p(α) = 0.
+        let alpha = GF_EXP[1];
+        assert_eq!(gf_poly_eval(&[alpha, 1], alpha), 0);
+    }
 }

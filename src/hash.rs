@@ -176,6 +176,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn shake256_empty_vector() {
+        // NIST FIPS 202 known-answer test: SHAKE256(""), first 32 bytes of output.
+        let mut out = [0u8; 32];
+        Shake256::default().finalize_xof().read(&mut out);
+        assert_eq!(
+            hex::encode(out),
+            "46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f"
+        );
+    }
+
     // ── Domain separators are actually applied ────────────────────────────────
 
     #[test]
@@ -206,6 +217,14 @@ mod tests {
         let mut buf = ek.to_vec();
         buf.push(0x01);
         assert_eq!(hex::encode(h_ek(&ek)), hex::encode(Sha3_256::digest(&buf)));
+    }
+
+    #[test]
+    fn h_ek_sensitive_to_input() {
+        let ek1 = [0xABu8; 100];
+        let mut ek2 = ek1;
+        ek2[0] ^= 1;
+        assert_ne!(h_ek(&ek1), h_ek(&ek2));
     }
 
     // ── G : SHA3-512(ek_hash ‖ m ‖ salt ‖ 0x00), split K=[0:32], θ=[32:64] ─────
@@ -324,5 +343,16 @@ mod tests {
         let (dk2, ek2) = i_pke_seed(&seed);
         assert_eq!(dk1.as_slice(), dk2.as_slice());
         assert_eq!(ek1, ek2);
+    }
+
+    #[test]
+    fn i_pke_seed_sensitive_to_input() {
+        let seed1 = [0x5Au8; SEED_BYTES];
+        let mut seed2 = seed1;
+        seed2[0] ^= 1;
+        let (dk1, ek1) = i_pke_seed(&seed1);
+        let (dk2, ek2) = i_pke_seed(&seed2);
+        assert_ne!(dk1.as_slice(), dk2.as_slice());
+        assert_ne!(&ek1[..], &ek2[..]);
     }
 }
