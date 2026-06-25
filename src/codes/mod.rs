@@ -112,7 +112,9 @@ mod tests {
 
     /// Deterministic K-byte test message.
     fn test_msg<P: HqcParams>() -> Vec<u8> {
-        (0..P::K).map(|i| (i.wrapping_mul(37).wrapping_add(11)) as u8).collect()
+        (0..P::K)
+            .map(|i| (i.wrapping_mul(37).wrapping_add(11)) as u8)
+            .collect()
     }
 
     // ── Roundtrip with no errors ──────────────────────────────────────────────
@@ -125,11 +127,17 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_no_errors_128() { roundtrip_no_errors::<Hqc128>(); }
+    fn roundtrip_no_errors_128() {
+        roundtrip_no_errors::<Hqc128>();
+    }
     #[test]
-    fn roundtrip_no_errors_192() { roundtrip_no_errors::<Hqc192>(); }
+    fn roundtrip_no_errors_192() {
+        roundtrip_no_errors::<Hqc192>();
+    }
     #[test]
-    fn roundtrip_no_errors_256() { roundtrip_no_errors::<Hqc256>(); }
+    fn roundtrip_no_errors_256() {
+        roundtrip_no_errors::<Hqc256>();
+    }
 
     // ── Codeword occupies exactly the low n1*N2 bits ──────────────────────────
 
@@ -146,7 +154,11 @@ mod tests {
     // ── A few bit errors within RM capacity per block → recovers ──────────────
 
     fn flip_bit<P: HqcParams>(p: &mut Poly<P>, pos: usize) {
-        if p.get_bit(pos) == 1 { p.clear_bit(pos); } else { p.set_bit(pos); }
+        if p.get_bit(pos) == 1 {
+            p.clear_bit(pos);
+        } else {
+            p.set_bit(pos);
+        }
     }
 
     fn roundtrip_small_bit_errors<P: HqcParams>() {
@@ -164,11 +176,17 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_small_bit_errors_128() { roundtrip_small_bit_errors::<Hqc128>(); }
+    fn roundtrip_small_bit_errors_128() {
+        roundtrip_small_bit_errors::<Hqc128>();
+    }
     #[test]
-    fn roundtrip_small_bit_errors_192() { roundtrip_small_bit_errors::<Hqc192>(); }
+    fn roundtrip_small_bit_errors_192() {
+        roundtrip_small_bit_errors::<Hqc192>();
+    }
     #[test]
-    fn roundtrip_small_bit_errors_256() { roundtrip_small_bit_errors::<Hqc256>(); }
+    fn roundtrip_small_bit_errors_256() {
+        roundtrip_small_bit_errors::<Hqc256>();
+    }
 
     // ── δ fully-corrupted blocks → RM yields wrong symbols, RS fixes them ──────
 
@@ -188,9 +206,15 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_delta_symbol_errors_128() { roundtrip_delta_symbol_errors::<Hqc128>(); }
+    fn roundtrip_delta_symbol_errors_128() {
+        roundtrip_delta_symbol_errors::<Hqc128>();
+    }
     #[test]
-    fn roundtrip_delta_symbol_errors_192() { roundtrip_delta_symbol_errors::<Hqc192>(); }
+    fn roundtrip_delta_symbol_errors_192() {
+        roundtrip_delta_symbol_errors::<Hqc192>();
+    }
     #[test]
-    fn roundtrip_delta_symbol_errors_256() { roundtrip_delta_symbol_errors::<Hqc256>(); }
+    fn roundtrip_delta_symbol_errors_256() {
+        roundtrip_delta_symbol_errors::<Hqc256>();
+    }
 }

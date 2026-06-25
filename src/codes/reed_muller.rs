@@ -100,7 +100,7 @@ pub fn rm_encode(m: u8, multiplicity: usize, out: &mut [u8], bit_offset: usize) 
     for rep in 0..multiplicity {
         let base_bit = bit_offset + rep * 128;
         let base_byte = base_bit / 8;
-        debug_assert!(base_bit % 8 == 0, "rm_encode requires byte-aligned output");
+        debug_assert!(base_bit.is_multiple_of(8), "rm_encode requires byte-aligned output");
 
         // Write lo (bits 0..63 of codeword) as 8 bytes.
         let lo_bytes = lo.to_le_bytes();
@@ -135,7 +135,7 @@ fn wht(f: &mut [i16; 128]) {
             for j in i..i + step {
                 let a = f[j];
                 let b = f[j + step];
-                f[j]        = a + b;
+                f[j] = a + b;
                 f[j + step] = a - b;
             }
             i += 2 * step;
@@ -165,12 +165,12 @@ pub fn rm_decode(block: &[u8], multiplicity: usize) -> u8 {
 
     for rep in 0..multiplicity {
         let base = rep * 16; // 16 bytes = 128 bits per copy
-        for i in 0..128 {
+        for (i, fi) in f.iter_mut().enumerate() {
             let byte_idx = i / 8;
-            let bit_idx  = i % 8;
+            let bit_idx = i % 8;
             let bit = (block[base + byte_idx] >> bit_idx) & 1;
             // +1 if bit==0, -1 if bit==1: equivalent to 1 - 2*bit
-            f[i] += 1 - 2 * (bit as i16);
+            *fi += 1 - 2 * (bit as i16);
         }
     }
 
@@ -193,16 +193,15 @@ pub fn rm_decode(block: &[u8], multiplicity: usize) -> u8 {
     let mut best_idx = 0u8;
     let mut best_neg = 0u8; // 1 if F̂[best_idx] < 0
 
-    for k in 0..128usize {
-        let val = f[k];
+    for (k, &val) in f.iter().enumerate() {
         let abs_val = val.abs();
-        let is_neg  = (val < 0) as u8;
+        let is_neg = (val < 0) as u8;
 
         // Update if strictly greater (ascending scan ⇒ smallest index wins ties).
         let update = Choice::from((abs_val > best_abs) as u8);
         best_abs = i16::conditional_select(&best_abs, &abs_val, update);
         best_idx = u8::conditional_select(&best_idx, &(k as u8), update);
-        best_neg = u8::conditional_select(&best_neg, &is_neg,    update);
+        best_neg = u8::conditional_select(&best_neg, &is_neg, update);
     }
 
     // Step 4: reconstruct the byte.
@@ -254,8 +253,11 @@ mod tests {
             for mult in [3usize, 5] {
                 let buf = encode_byte_to_vec(m, mult);
                 for rep in 1..mult {
-                    assert_eq!(&buf[0..16], &buf[rep * 16..rep * 16 + 16],
-                        "m={m} mult={mult} rep={rep}");
+                    assert_eq!(
+                        &buf[0..16],
+                        &buf[rep * 16..rep * 16 + 16],
+                        "m={m} mult={mult} rep={rep}"
+                    );
                 }
             }
         }
@@ -271,9 +273,9 @@ mod tests {
             let [lo, hi] = rm_encode_byte(m);
             let weight = lo.count_ones() + hi.count_ones();
             let expected = match m {
-                0   => 0,
+                0 => 0,
                 128 => 128,
-                _   => 64,
+                _ => 64,
             };
             assert_eq!(weight, expected, "m={m:#04x}");
         }

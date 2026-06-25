@@ -4,6 +4,10 @@ version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Pure-Rust implementation of HQC (Hamming Quasi-Cyclic) post-quantum KEM"
+repository = "https://github.com/damesca/hqcr"
+readme = "README.md"
+keywords = ["post-quantum", "cryptography", "kem", "hqc", "pqc"]
+categories = ["cryptography", "algorithms"]
 exclude = [
     "tests/hqc-1/**",
     "tests/hqc-3/**",

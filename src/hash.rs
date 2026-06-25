@@ -135,9 +135,7 @@ pub fn xof(seed: &[u8]) -> impl XofReader {
 /// The PKE seed-split function I. Expands the 32-byte PKE seed into the dk-seed
 /// (secret — feeds the sparse secret key (y, x), zeroized on drop) and the
 /// ek-seed (public — feeds the uniform h). Called inside PKE.Keygen.
-pub fn i_pke_seed(
-    seed_pke: &[u8; SEED_BYTES],
-) -> (Zeroizing<[u8; SEED_BYTES]>, [u8; SEED_BYTES]) {
+pub fn i_pke_seed(seed_pke: &[u8; SEED_BYTES]) -> (Zeroizing<[u8; SEED_BYTES]>, [u8; SEED_BYTES]) {
     let digest = sha3_512_ds(&[seed_pke], DOMAIN_I);
 
     let mut seed_dk = Zeroizing::new([0u8; SEED_BYTES]);
@@ -227,7 +225,11 @@ mod tests {
         let expected = Sha3_512::digest(&buf);
 
         assert_eq!(&k[..], &expected[..32], "K must be the first 32 bytes");
-        assert_eq!(theta.as_slice(), &expected[32..64], "θ must be the last 32 bytes");
+        assert_eq!(
+            theta.as_slice(),
+            &expected[32..64],
+            "θ must be the last 32 bytes"
+        );
     }
 
     #[test]
@@ -274,7 +276,10 @@ mod tests {
         buf.extend_from_slice(&sigma);
         buf.extend_from_slice(&c);
         buf.push(0x03);
-        assert_eq!(hex::encode(j(&ek_hash, &sigma, &c)), hex::encode(Sha3_256::digest(&buf)));
+        assert_eq!(
+            hex::encode(j(&ek_hash, &sigma, &c)),
+            hex::encode(Sha3_256::digest(&buf))
+        );
     }
 
     #[test]

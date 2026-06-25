@@ -19,10 +19,10 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 use hqcr::hash;
+use hqcr::kem::{decaps, encaps_deterministic, keygen_from_seed};
 use hqcr::poly::mul::{mul_dense_ct, mul_sparse_dense};
 use hqcr::poly::sampling::{sample_fixed_weight, sample_uniform};
 use hqcr::poly::Poly;
-use hqcr::kem::{decaps, encaps_deterministic, keygen_from_seed};
 use hqcr::{Hqc128, Hqc192, Hqc256, HqcParams, SALT_BYTES, SEED_BYTES};
 
 /// Build a deterministic dense (uniform) and sparse (weight-ω) operand pair for
@@ -38,7 +38,10 @@ fn mul_operands<P: HqcParams>() -> (Poly<P>, Poly<P>) {
 fn bench_poly_mul(c: &mut Criterion) {
     let mut group = c.benchmark_group("poly_mul");
 
-    fn run<P: HqcParams>(group: &mut criterion::BenchmarkGroup<criterion::measurement::WallTime>, name: &str) {
+    fn run<P: HqcParams>(
+        group: &mut criterion::BenchmarkGroup<criterion::measurement::WallTime>,
+        name: &str,
+    ) {
         let (dense, sparse) = mul_operands::<P>();
 
         // Mode A — sparse × dense (O(ω · N_WORDS)); keygen / encrypt path.
@@ -62,7 +65,10 @@ fn bench_poly_mul(c: &mut Criterion) {
 fn bench_kem(c: &mut Criterion) {
     let mut group = c.benchmark_group("kem");
 
-    fn run<P: HqcParams>(group: &mut criterion::BenchmarkGroup<criterion::measurement::WallTime>, name: &str) {
+    fn run<P: HqcParams>(
+        group: &mut criterion::BenchmarkGroup<criterion::measurement::WallTime>,
+        name: &str,
+    ) {
         let seed = [0x42u8; SEED_BYTES];
         let m = vec![0x11u8; P::K];
         let salt = [0x22u8; SALT_BYTES];

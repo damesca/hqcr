@@ -32,11 +32,11 @@
 //   resolution, and the final bit-setting all run over fixed-length loops with
 //   constant-time selects, leaking nothing about the sampled positions.
 
-use sha3::digest::{ExtendableOutput, XofReader};
+use sha3::digest::XofReader;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
-use crate::params::HqcParams;
 use super::Poly;
+use crate::params::HqcParams;
 
 // ── Internal XOF helpers ──────────────────────────────────────────────────────
 
@@ -85,11 +85,11 @@ fn read_u64(xof: &mut impl XofReader) -> u64 {
 /// the drawn values. The reference accepts this for the once-per-keygen secret
 /// sampling. (Reproducing the reference's exact rejection behaviour is required
 /// for KAT correctness, so this timing property is inherent, not a choice.)
-pub fn sample_fixed_weight<P: HqcParams>(
-    xof: &mut impl XofReader,
-    weight: usize,
-) -> Poly<P> {
-    debug_assert!(weight <= 256, "weight {weight} exceeds internal buffer size");
+pub fn sample_fixed_weight<P: HqcParams>(xof: &mut impl XofReader, weight: usize) -> Poly<P> {
+    debug_assert!(
+        weight <= 256,
+        "weight {weight} exceeds internal buffer size"
+    );
     debug_assert!(weight <= P::N, "weight {weight} > N={}", P::N);
 
     let n = P::N as u32;
@@ -125,8 +125,8 @@ pub fn sample_fixed_weight<P: HqcParams>(
 
         // Redraw on duplicate: scan the accepted prefix; only advance if distinct.
         let mut dup = false;
-        for k in 0..filled {
-            if positions[k] == pos {
+        for &p in &positions[..filled] {
+            if p == pos {
                 dup = true;
             }
         }
@@ -137,8 +137,8 @@ pub fn sample_fixed_weight<P: HqcParams>(
 
     // Build the polynomial: set bit at each accepted position.
     let mut poly = Poly::<P>::zero();
-    for j in 0..weight {
-        poly.set_bit(positions[j] as usize);
+    for &p in &positions[..weight] {
+        poly.set_bit(p as usize);
     }
     poly
 }
@@ -152,7 +152,7 @@ pub fn sample_fixed_weight<P: HqcParams>(
 ///
 /// Algorithm (no rejection — exactly `4·weight` bytes consumed from `xof`):
 ///   1. For i in 0..weight: draw a little-endian u32 `rand_i` and set
-///        support[i] = i + ((rand_i · (N − i)) >> 32)
+///      support[i] = i + ((rand_i · (N − i)) >> 32)
 ///      The fixed-point multiply-shift maps `rand_i` uniformly into `[0, N−i)`,
 ///      so `support[i] ∈ [i, N)`.
 ///   2. Resolve duplicates backwards: for i from weight−1 down to 0, if
@@ -168,11 +168,11 @@ pub fn sample_fixed_weight<P: HqcParams>(
 /// `ConditionallySelectable`, and the bit-setting scans every word OR-ing in a
 /// masked bit — so neither timing nor memory-access pattern depends on the
 /// sampled position values.
-pub fn sample_fixed_weight_mod<P: HqcParams>(
-    xof: &mut impl XofReader,
-    weight: usize,
-) -> Poly<P> {
-    debug_assert!(weight <= 256, "weight {weight} exceeds internal buffer size");
+pub fn sample_fixed_weight_mod<P: HqcParams>(xof: &mut impl XofReader, weight: usize) -> Poly<P> {
+    debug_assert!(
+        weight <= 256,
+        "weight {weight} exceeds internal buffer size"
+    );
     debug_assert!(weight <= P::N, "weight {weight} > N={}", P::N);
 
     let mut support = [0u32; 256];
@@ -257,7 +257,7 @@ pub fn sample_uniform<P: HqcParams>(xof: &mut impl XofReader) -> Poly<P> {
 mod tests {
     use super::*;
     use crate::params::{Hqc128, Hqc192, Hqc256};
-    use sha3::{Shake256, digest::Update, digest::XofReader};
+    use sha3::{digest::Update, digest::XofReader, Shake256};
 
     fn make_xof(seed: &[u8]) -> impl XofReader {
         use sha3::digest::ExtendableOutput;
@@ -357,7 +357,11 @@ mod tests {
     fn mod_correct_weight<P: HqcParams>(seed: &[u8], weight: usize) {
         let mut xof = make_xof(seed);
         let p = sample_fixed_weight_mod::<P>(&mut xof, weight);
-        assert_eq!(p.hamming_weight(), weight, "exact weight (implies distinct positions)");
+        assert_eq!(
+            p.hamming_weight(),
+            weight,
+            "exact weight (implies distinct positions)"
+        );
         // No bits set in the overflow region above N-1.
         let last_bit = P::N & 63;
         if last_bit != 0 {
@@ -396,7 +400,10 @@ mod tests {
         let mut xof_b = make_xof(b"same-seed");
         let a = sample_fixed_weight::<Hqc128>(&mut xof_a, Hqc128::OMEGA_R);
         let b = sample_fixed_weight_mod::<Hqc128>(&mut xof_b, Hqc128::OMEGA_R);
-        assert_ne!(a, b, "rejection and mod samplers must produce different vectors");
+        assert_ne!(
+            a, b,
+            "rejection and mod samplers must produce different vectors"
+        );
     }
 
     // ── Hand-computed vectors: pin the exact formula, dedup, and endianness ────
@@ -424,11 +431,19 @@ mod tests {
         let weight = 8;
         let mut xof = FixedXof::new(vec![0xFFu8; 4 * weight]);
         let p = sample_fixed_weight_mod::<Hqc128>(&mut xof, weight);
-        assert_eq!(p.hamming_weight(), weight, "dedup must still yield distinct positions");
+        assert_eq!(
+            p.hamming_weight(),
+            weight,
+            "dedup must still yield distinct positions"
+        );
         for i in 0..(weight - 1) {
             assert_eq!(p.get_bit(i), 1, "bit {i} must be set");
         }
-        assert_eq!(p.get_bit(weight - 1), 0, "bit weight−1 must be clear (it became N−1)");
+        assert_eq!(
+            p.get_bit(weight - 1),
+            0,
+            "bit weight−1 must be clear (it became N−1)"
+        );
         assert_eq!(p.get_bit(Hqc128::N - 1), 1, "bit N−1 must be set");
     }
 
@@ -441,7 +456,11 @@ mod tests {
         let mut xof = FixedXof::new(vec![0x00, 0x00, 0x00, 0x80]);
         let p = sample_fixed_weight_mod::<Hqc128>(&mut xof, 1);
         assert_eq!(p.hamming_weight(), 1);
-        assert_eq!(p.get_bit(8834), 1, "expected position floor(N/2) = 8834 (little-endian)");
+        assert_eq!(
+            p.get_bit(8834),
+            1,
+            "expected position floor(N/2) = 8834 (little-endian)"
+        );
     }
 
     // ── uniform sampler ───────────────────────────────────────────────────────
@@ -452,8 +471,11 @@ mod tests {
         let p = sample_uniform::<Hqc128>(&mut xof);
         let last_bit = Hqc128::N & 63;
         let mask = (1u64 << last_bit) - 1;
-        assert_eq!(p.words[Hqc128::N_WORDS - 1] & !mask, 0,
-            "bits above N-1 must be zero");
+        assert_eq!(
+            p.words[Hqc128::N_WORDS - 1] & !mask,
+            0,
+            "bits above N-1 must be zero"
+        );
     }
 
     #[test]

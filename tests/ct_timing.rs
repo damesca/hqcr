@@ -74,10 +74,10 @@ use std::time::Instant;
 
 use hqcr::codes;
 use hqcr::hash;
+use hqcr::kem::{decaps, encaps_deterministic, keygen_from_seed};
 use hqcr::poly::mul::mul_dense_ct;
 use hqcr::poly::sampling::{sample_fixed_weight, sample_uniform};
 use hqcr::poly::Poly;
-use hqcr::kem::{decaps, encaps_deterministic, keygen_from_seed};
 use hqcr::{Hqc128, HqcParams, SALT_BYTES, SEED_BYTES};
 
 // ── Tunables ──────────────────────────────────────────────────────────────────
@@ -278,7 +278,11 @@ fn run_mul_dense_ct<P: HqcParams>(name: &str) {
         let bit = prng.next();
         let class_rand = (bit & 1) == 1;
         let idx = (bit >> 1) as usize % POOL;
-        let b: &Poly<P> = if class_rand { &rand_pool[idx] } else { &fix_pool[idx] };
+        let b: &Poly<P> = if class_rand {
+            &rand_pool[idx]
+        } else {
+            &fix_pool[idx]
+        };
         let c = measure_cycles(|| {
             let r = mul_dense_ct::<P>(&a, b);
             black_box(&r);
@@ -339,7 +343,11 @@ fn run_decaps<P: HqcParams>(name: &str) {
         let bit = prng.next();
         let class_rand = (bit & 1) == 1;
         let idx = (bit >> 1) as usize % POOL;
-        let c: &[u8] = if class_rand { &rand_pool[idx] } else { &fix_pool[idx] };
+        let c: &[u8] = if class_rand {
+            &rand_pool[idx]
+        } else {
+            &fix_pool[idx]
+        };
         let cyc = measure_cycles(|| {
             let k = decaps::<P>(&dk, c);
             black_box(&k);
@@ -421,7 +429,11 @@ fn run_codes_decode<P: HqcParams>(name: &str) {
         let bit = prng.next();
         let class_rand = (bit & 1) == 1;
         let idx = (bit >> 1) as usize % POOL;
-        let cw: &Poly<P> = if class_rand { &rand_pool[idx] } else { &fix_pool[idx] };
+        let cw: &Poly<P> = if class_rand {
+            &rand_pool[idx]
+        } else {
+            &fix_pool[idx]
+        };
         let cyc = measure_cycles(|| {
             let r = codes::decode::<P>(cw);
             black_box(&r);
@@ -453,5 +465,7 @@ fn ct_timing_decaps() {
 
 #[test]
 fn ct_timing_codes_decode() {
-    run_codes_decode::<Hqc128>("codes::decode (Hqc128) — RS decoder isolated, strong signal expected (§3.3)");
+    run_codes_decode::<Hqc128>(
+        "codes::decode (Hqc128) — RS decoder isolated, strong signal expected (§3.3)",
+    );
 }

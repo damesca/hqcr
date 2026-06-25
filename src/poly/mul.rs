@@ -46,8 +46,8 @@
 //   `unsafe` in the crate. Reference: the official HQC AVX2 C implementation
 //   (pqc-hqc.org) uses _mm_clmulepi64_si128 in its vect_mul for the same job.
 
-use crate::params::HqcParams;
 use super::{Poly, MAX_N_WORDS};
+use crate::params::HqcParams;
 
 // ── Wide accumulator ──────────────────────────────────────────────────────────
 //
@@ -166,9 +166,7 @@ pub fn mul_sparse_dense<P: HqcParams>(sparse: &Poly<P>, dense: &Poly<P>) -> Poly
 #[cfg(all(target_arch = "x86_64", target_feature = "pclmulqdq"))]
 #[inline]
 fn clmul64(a: u64, b: u64) -> (u64, u64) {
-    use core::arch::x86_64::{
-        __m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128,
-    };
+    use core::arch::x86_64::{__m128i, _mm_clmulepi64_si128, _mm_set_epi64x, _mm_storeu_si128};
     // SAFETY: gated on `target_feature = "pclmulqdq"`, so the carry-less
     // multiply intrinsic is guaranteed available; `_mm_set_epi64x` /
     // `_mm_storeu_si128` are x86-64 SSE2 baseline. The store targets the local
@@ -242,7 +240,7 @@ fn karatsuba(out: &mut [u64], a: &[u64], b: &[u64], n: usize, scratch: &mut [u64
         return;
     }
 
-    let h = (n + 1) / 2; // low-half limb count (ceil); high half = n - h ≤ h
+    let h = n.div_ceil(2); // low-half limb count (ceil); high half = n - h ≤ h
     let nhi = n - h;
 
     let (a_lo, a_hi) = (&a[0..h], &a[h..n]);
@@ -316,7 +314,13 @@ pub fn mul_dense_ct<P: HqcParams>(a: &Poly<P>, b: &Poly<P>) -> Poly<P> {
 
     let mut acc = [0u64; WIDE_WORDS];
     let mut scratch = [0u64; KARATSUBA_SCRATCH_WORDS];
-    karatsuba(&mut acc[..2 * nw], &a.words[..nw], &b.words[..nw], nw, &mut scratch);
+    karatsuba(
+        &mut acc[..2 * nw],
+        &a.words[..nw],
+        &b.words[..nw],
+        nw,
+        &mut scratch,
+    );
     reduce_wide::<P>(&acc)
 }
 
@@ -448,8 +452,11 @@ mod tests {
 
     #[test]
     fn sparse_dense_commutativity_hqc128() {
-        use sha3::{Shake256, digest::{Update, ExtendableOutput}};
         use crate::poly::sampling::sample_fixed_weight;
+        use sha3::{
+            digest::{ExtendableOutput, Update},
+            Shake256,
+        };
 
         for seed in 0u8..10 {
             let mut xof = {
@@ -473,8 +480,11 @@ mod tests {
 
     #[test]
     fn sparse_dense_commutativity_hqc256() {
-        use sha3::{Shake256, digest::{Update, ExtendableOutput}};
         use crate::poly::sampling::sample_fixed_weight;
+        use sha3::{
+            digest::{ExtendableOutput, Update},
+            Shake256,
+        };
 
         let mut xof = {
             let mut h = Shake256::default();
@@ -499,8 +509,11 @@ mod tests {
     #[test]
     fn sparse_dense_matches_dense_ct() {
         // Both modes must produce identical results given the same inputs.
-        use sha3::{Shake256, digest::{Update, ExtendableOutput}};
         use crate::poly::sampling::{sample_fixed_weight, sample_uniform};
+        use sha3::{
+            digest::{ExtendableOutput, Update},
+            Shake256,
+        };
 
         for seed in 0u8..5 {
             let mut xof = {
@@ -553,7 +566,10 @@ mod tests {
 
     fn karatsuba_matches_bitwise<P: HqcParams>(tag: &[u8]) {
         use crate::poly::sampling::sample_uniform;
-        use sha3::{digest::{ExtendableOutput, Update}, Shake256};
+        use sha3::{
+            digest::{ExtendableOutput, Update},
+            Shake256,
+        };
 
         for seed in 0u8..8 {
             let mut xof = {
@@ -569,7 +585,10 @@ mod tests {
 
             let fast = mul_dense_ct::<P>(&a, &b);
             let reference = mul_dense_ct_bitwise::<P>(&a, &b);
-            assert_eq!(fast, reference, "Karatsuba vs bit-level mismatch, seed={seed}");
+            assert_eq!(
+                fast, reference,
+                "Karatsuba vs bit-level mismatch, seed={seed}"
+            );
 
             // Commutativity of the full product, for good measure.
             let fast_rev = mul_dense_ct::<P>(&b, &a);
@@ -601,8 +620,8 @@ mod tests {
 
         let bc = b.add(&c);
         let lhs = mul_sparse_dense::<Hqc128>(&a, &bc);
-        let ab  = mul_sparse_dense::<Hqc128>(&a, &b);
-        let ac  = mul_sparse_dense::<Hqc128>(&a, &c);
+        let ab = mul_sparse_dense::<Hqc128>(&a, &b);
+        let ac = mul_sparse_dense::<Hqc128>(&a, &c);
         let rhs = ab.add(&ac);
         assert_eq!(lhs, rhs);
     }
@@ -611,8 +630,11 @@ mod tests {
 
     #[test]
     fn result_has_no_overflow_bits_after_mul() {
-        use sha3::{Shake256, digest::{Update, ExtendableOutput}};
         use crate::poly::sampling::sample_fixed_weight;
+        use sha3::{
+            digest::{ExtendableOutput, Update},
+            Shake256,
+        };
 
         let mut xof = {
             let mut h = Shake256::default();
@@ -625,8 +647,11 @@ mod tests {
 
         let last_bit = Hqc128::N & 63;
         let mask = (1u64 << last_bit) - 1;
-        assert_eq!(r.words[Hqc128::N_WORDS - 1] & !mask, 0,
-            "overflow bits not cleared by reduce()");
+        assert_eq!(
+            r.words[Hqc128::N_WORDS - 1] & !mask,
+            0,
+            "overflow bits not cleared by reduce()"
+        );
     }
 
     // ── Parameter set compilation checks ─────────────────────────────────────

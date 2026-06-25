@@ -31,13 +31,13 @@ use crate::poly::Poly;
 /// Bytes needed for a full ring element (N bits): ⌈N/8⌉.
 #[inline]
 pub fn ring_bytes<P: HqcParams>() -> usize {
-    (P::N + 7) / 8
+    P::N.div_ceil(8)
 }
 
 /// Bytes needed for the codeword component v (N1·N2 bits, exact): N1·N2/8.
 #[inline]
 pub fn v_bytes<P: HqcParams>() -> usize {
-    (P::N1 * P::N2 + 7) / 8
+    (P::N1 * P::N2).div_ceil(8)
 }
 
 // ── Core little-endian pack / unpack over an explicit bit count ────────────────
@@ -45,7 +45,7 @@ pub fn v_bytes<P: HqcParams>() -> usize {
 /// Pack the low `n_bits` of `poly` into ⌈n_bits/8⌉ little-endian bytes.
 /// High bits of the final partial byte are zeroed.
 fn pack<P: HqcParams>(poly: &Poly<P>, n_bits: usize) -> Vec<u8> {
-    let n_bytes = (n_bits + 7) / 8;
+    let n_bytes = n_bits.div_ceil(8);
     let mut out = vec![0u8; n_bytes];
     for (k, b) in out.iter_mut().enumerate() {
         *b = (poly.words[k / 8] >> (8 * (k % 8))) as u8;
@@ -61,7 +61,7 @@ fn pack<P: HqcParams>(poly: &Poly<P>, n_bits: usize) -> Vec<u8> {
 /// Unpack ⌈n_bits/8⌉ little-endian bytes into a fresh `Poly<P>`.
 /// Bits at/above `n_bits` are masked to zero so the Poly stays canonical.
 fn unpack<P: HqcParams>(bytes: &[u8], n_bits: usize) -> Poly<P> {
-    let n_bytes = (n_bits + 7) / 8;
+    let n_bytes = n_bits.div_ceil(8);
     debug_assert_eq!(bytes.len(), n_bytes);
     let rem = n_bits % 8;
 
@@ -129,11 +129,7 @@ pub fn unpack_public_key<P: HqcParams>(bytes: &[u8]) -> Option<([u8; SEED_BYTES]
 // ── Ciphertext: u || v || salt ────────────────────────────────────────────────
 
 /// Pack cKEM = u || v || salt. Output length is `P::CT_BYTES`.
-pub fn pack_ciphertext<P: HqcParams>(
-    u: &Poly<P>,
-    v: &Poly<P>,
-    salt: &[u8; SALT_BYTES],
-) -> Vec<u8> {
+pub fn pack_ciphertext<P: HqcParams>(u: &Poly<P>, v: &Poly<P>, salt: &[u8; SALT_BYTES]) -> Vec<u8> {
     let mut out = Vec::with_capacity(P::CT_BYTES);
     out.extend_from_slice(&ring_to_bytes(u));
     out.extend_from_slice(&v_to_bytes(v));
@@ -197,8 +193,14 @@ mod tests {
     #[test]
     fn lengths_match_params() {
         assert_eq!(ring_bytes::<Hqc128>(), (Hqc128::N + 7) / 8);
-        assert_eq!(ring_to_bytes(&Poly::<Hqc128>::zero()).len(), (Hqc128::N + 7) / 8);
-        assert_eq!(v_to_bytes(&Poly::<Hqc128>::zero()).len(), Hqc128::N1 * Hqc128::N2 / 8);
+        assert_eq!(
+            ring_to_bytes(&Poly::<Hqc128>::zero()).len(),
+            (Hqc128::N + 7) / 8
+        );
+        assert_eq!(
+            v_to_bytes(&Poly::<Hqc128>::zero()).len(),
+            Hqc128::N1 * Hqc128::N2 / 8
+        );
 
         // Composite formats.
         let pk = pack_public_key::<Hqc128>(&[0u8; SEED_BYTES], &Poly::zero());
@@ -218,11 +220,17 @@ mod tests {
     }
 
     #[test]
-    fn ring_roundtrip_128() { ring_roundtrip::<Hqc128>(); }
+    fn ring_roundtrip_128() {
+        ring_roundtrip::<Hqc128>();
+    }
     #[test]
-    fn ring_roundtrip_192() { ring_roundtrip::<Hqc192>(); }
+    fn ring_roundtrip_192() {
+        ring_roundtrip::<Hqc192>();
+    }
     #[test]
-    fn ring_roundtrip_256() { ring_roundtrip::<Hqc256>(); }
+    fn ring_roundtrip_256() {
+        ring_roundtrip::<Hqc256>();
+    }
 
     // ── v round-trips (only the low N1*N2 bits survive) ───────────────────────
 
@@ -235,11 +243,17 @@ mod tests {
     }
 
     #[test]
-    fn v_roundtrip_128() { v_roundtrip::<Hqc128>(); }
+    fn v_roundtrip_128() {
+        v_roundtrip::<Hqc128>();
+    }
     #[test]
-    fn v_roundtrip_192() { v_roundtrip::<Hqc192>(); }
+    fn v_roundtrip_192() {
+        v_roundtrip::<Hqc192>();
+    }
     #[test]
-    fn v_roundtrip_256() { v_roundtrip::<Hqc256>(); }
+    fn v_roundtrip_256() {
+        v_roundtrip::<Hqc256>();
+    }
 
     // ── Partial final byte: high bits beyond N must be zero / masked ───────────
 
@@ -251,7 +265,11 @@ mod tests {
         let p = patterned_poly::<Hqc128>(3, Hqc128::N); // dense, exercises the tail
         let bytes = ring_to_bytes(&p);
         let last = *bytes.last().unwrap();
-        assert_eq!(last & !((1u8 << rem) - 1), 0, "high bits of final byte must be zero");
+        assert_eq!(
+            last & !((1u8 << rem) - 1),
+            0,
+            "high bits of final byte must be zero"
+        );
     }
 
     #[test]
@@ -279,11 +297,17 @@ mod tests {
     }
 
     #[test]
-    fn public_key_roundtrip_128() { public_key_roundtrip::<Hqc128>(); }
+    fn public_key_roundtrip_128() {
+        public_key_roundtrip::<Hqc128>();
+    }
     #[test]
-    fn public_key_roundtrip_192() { public_key_roundtrip::<Hqc192>(); }
+    fn public_key_roundtrip_192() {
+        public_key_roundtrip::<Hqc192>();
+    }
     #[test]
-    fn public_key_roundtrip_256() { public_key_roundtrip::<Hqc256>(); }
+    fn public_key_roundtrip_256() {
+        public_key_roundtrip::<Hqc256>();
+    }
 
     fn ciphertext_roundtrip<P: HqcParams>() {
         let u = patterned_poly::<P>(71, P::N);
@@ -297,11 +321,17 @@ mod tests {
     }
 
     #[test]
-    fn ciphertext_roundtrip_128() { ciphertext_roundtrip::<Hqc128>(); }
+    fn ciphertext_roundtrip_128() {
+        ciphertext_roundtrip::<Hqc128>();
+    }
     #[test]
-    fn ciphertext_roundtrip_192() { ciphertext_roundtrip::<Hqc192>(); }
+    fn ciphertext_roundtrip_192() {
+        ciphertext_roundtrip::<Hqc192>();
+    }
     #[test]
-    fn ciphertext_roundtrip_256() { ciphertext_roundtrip::<Hqc256>(); }
+    fn ciphertext_roundtrip_256() {
+        ciphertext_roundtrip::<Hqc256>();
+    }
 
     // ── Wrong-length inputs are rejected, not panicked on ─────────────────────
 

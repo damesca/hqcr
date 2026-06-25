@@ -52,7 +52,10 @@ fn concat_seeds(path: &str) -> Vec<u8> {
             buf.extend_from_slice(&hex::decode(rest.trim()).expect("seed must be valid hex"));
         }
     }
-    assert!(buf.len() >= 96, "need at least two seeds' worth of bytes in {path}");
+    assert!(
+        buf.len() >= 96,
+        "need at least two seeds' worth of bytes in {path}"
+    );
     buf
 }
 
@@ -155,7 +158,13 @@ fn generate<P: HqcParams>(req: &str, rsp: &str, level: u8, sec: u32) {
     out.push_str(&format!("\n*********\n  HQC-{level}\n*********\n\n"));
     out.push_str(&format!(
         "N: {}   N1: {}   N2: {}   OMEGA: {}   OMEGA_R: {}   Failure rate: 2^-{}   Sec: {} bits\n",
-        P::N, P::N1, P::N2, P::OMEGA, P::OMEGA_R, sec, sec
+        P::N,
+        P::N1,
+        P::N2,
+        P::OMEGA,
+        P::OMEGA_R,
+        sec,
+        sec
     ));
 
     // KEYGEN
@@ -172,8 +181,16 @@ fn generate<P: HqcParams>(req: &str, rsp: &str, level: u8, sec: u32) {
 
     // ENCAPS
     out.push_str("\n\n### ENCAPS ###\n\n");
-    kv(&mut out, "Reed-Solomon code word", &hex::encode(&enc.rs_codeword));
-    kv(&mut out, "Concatenated code word", &v_hex::<P>(&enc.concatenated));
+    kv(
+        &mut out,
+        "Reed-Solomon code word",
+        &hex::encode(&enc.rs_codeword),
+    );
+    kv(
+        &mut out,
+        "Concatenated code word",
+        &v_hex::<P>(&enc.concatenated),
+    );
     kv(&mut out, "h", &ring_hex::<P>(&h));
     kv(&mut out, "s", &ring_hex::<P>(&ek.s));
     kv(&mut out, "r1", &ring_hex::<P>(&enc.r1));
@@ -216,13 +233,21 @@ fn generate<P: HqcParams>(req: &str, rsp: &str, level: u8, sec: u32) {
     );
     // No-error case: the RS received word equals the RM decoding result.
     kv(&mut out, "Reed-Solomon code word", &hex::encode(&rm_result));
-    kv(&mut out, "Concatenated code word", &v_hex::<P>(&reenc.concatenated));
+    kv(
+        &mut out,
+        "Concatenated code word",
+        &v_hex::<P>(&reenc.concatenated),
+    );
     kv(&mut out, "h", &ring_hex::<P>(&h));
     kv(&mut out, "s", &ring_hex::<P>(&ek.s));
     kv(&mut out, "r1", &ring_hex::<P>(&reenc.r1));
     kv(&mut out, "r2", &ring_hex::<P>(&reenc.r2));
     kv(&mut out, "e", &ring_hex::<P>(&reenc.e));
-    kv(&mut out, "Truncate(s.r2 + e)", &v_hex::<P>(&reenc.sr2_plus_e));
+    kv(
+        &mut out,
+        "Truncate(s.r2 + e)",
+        &v_hex::<P>(&reenc.sr2_plus_e),
+    );
     kv(&mut out, "c_pke->u", &ring_hex::<P>(&reenc.u));
     kv(&mut out, "c_pke->v", &v_hex::<P>(&reenc.v));
     kv(&mut out, "ek_pke", &hex::encode(&pk));
@@ -249,19 +274,23 @@ fn generate<P: HqcParams>(req: &str, rsp: &str, level: u8, sec: u32) {
 // ── PKE.Encrypt with all intermediates exposed ────────────────────────────────
 
 struct EncryptTrace<P: HqcParams> {
-    rs_codeword: Vec<u8>,    // RS codeword (n1 GF(2^8) symbols)
-    concatenated: Poly<P>,   // C.Encode(m) (RMRS codeword embedded in the ring)
+    rs_codeword: Vec<u8>,  // RS codeword (n1 GF(2^8) symbols)
+    concatenated: Poly<P>, // C.Encode(m) (RMRS codeword embedded in the ring)
     r1: Poly<P>,
     r2: Poly<P>,
     e: Poly<P>,
-    sr2_plus_e: Poly<P>,     // s·r2 + e (rendered truncated to the codeword region)
-    u: Poly<P>,              // authoritative ciphertext component (from pke::encrypt)
+    sr2_plus_e: Poly<P>, // s·r2 + e (rendered truncated to the codeword region)
+    u: Poly<P>,          // authoritative ciphertext component (from pke::encrypt)
     v: Poly<P>,
 }
 
 /// Recompute every PKE.Encrypt intermediate, mirroring `pke::encrypt` exactly,
 /// while taking the authoritative `(u, v)` straight from the implementation.
-fn encrypt_trace<P: HqcParams>(ek: &pke::EncryptionKey<P>, m: &[u8], theta: &[u8]) -> EncryptTrace<P> {
+fn encrypt_trace<P: HqcParams>(
+    ek: &pke::EncryptionKey<P>,
+    m: &[u8],
+    theta: &[u8],
+) -> EncryptTrace<P> {
     let (u, v) = pke::encrypt::<P>(ek, m, theta);
 
     let mut rs_codeword = vec![0u8; P::N1];
@@ -277,7 +306,16 @@ fn encrypt_trace<P: HqcParams>(ek: &pke::EncryptionKey<P>, m: &[u8], theta: &[u8
     let sr2 = mul_sparse_dense::<P>(&r2, &ek.s);
     let sr2_plus_e = sr2.add(&e);
 
-    EncryptTrace { rs_codeword, concatenated, r1, r2, e, sr2_plus_e, u, v }
+    EncryptTrace {
+        rs_codeword,
+        concatenated,
+        r1,
+        r2,
+        e,
+        sr2_plus_e,
+        u,
+        v,
+    }
 }
 
 // ── Entry points (one per parameter set) ──────────────────────────────────────

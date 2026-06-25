@@ -79,7 +79,9 @@ impl KatPrng {
         let mut h = Shake256::default();
         Update::update(&mut h, seed);
         Update::update(&mut h, &[HQC_PRNG_DOMAIN]);
-        KatPrng { reader: h.finalize_xof() }
+        KatPrng {
+            reader: h.finalize_xof(),
+        }
     }
 
     /// `prng_get_bytes(out, out.len())`: squeeze the next bytes off the stream.
@@ -171,7 +173,12 @@ fn parse_rsp(path: &str) -> HashMap<usize, RspEntry> {
             let c = count.expect("`count =` must precede `ss =`");
             map.insert(
                 c,
-                RspEntry { pk: std::mem::take(&mut pk), sk: std::mem::take(&mut sk), ct: std::mem::take(&mut ct), ss },
+                RspEntry {
+                    pk: std::mem::take(&mut pk),
+                    sk: std::mem::take(&mut sk),
+                    ct: std::mem::take(&mut ct),
+                    ss,
+                },
             );
         }
     }
@@ -221,7 +228,8 @@ fn generate<P: HqcParams>(req: &str, reference_rsp: &str, out_rsp: &str, header:
     let mut output = String::new();
     output.push_str(&format!("# {header}\n\n"));
     // (count, pk, sk, ct, ss) uppercase-hex, retained for the self-check below.
-    let mut generated: Vec<(usize, String, String, String, String)> = Vec::with_capacity(seeds.len());
+    let mut generated: Vec<(usize, String, String, String, String)> =
+        Vec::with_capacity(seeds.len());
 
     for (count, seed) in &seeds {
         let mut prng = KatPrng::new(&seed[..]);

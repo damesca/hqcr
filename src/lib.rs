@@ -60,26 +60,26 @@
 //! internals — `pub` so the test harnesses can reach them, but hidden from these
 //! docs and not part of the stable API.
 
-pub mod params;
 pub(crate) mod gf;
-pub mod pke;
 pub mod kem;
+pub mod params;
+pub mod pke;
 
 // Implementation internals: kept `pub` so the integration / KAT / intermediate
 // harnesses in `tests/` can reach them, but hidden from the rendered docs and
 // not covered by any API-stability promise.
 #[doc(hidden)]
-pub mod poly;
-#[doc(hidden)]
 pub mod codes;
+#[doc(hidden)]
+pub mod hash;
 #[doc(hidden)]
 pub mod parsing;
 #[doc(hidden)]
-pub mod hash;
+pub mod poly;
 
 // ── Public API surface ────────────────────────────────────────────────────────
 
-pub use params::{HqcParams, Hqc128, Hqc192, Hqc256};
+pub use params::{Hqc128, Hqc192, Hqc256, HqcParams};
 pub use params::{SALT_BYTES, SEED_BYTES, SHARED_KEY_BYTES};
 
 /// The 32-byte shared secret produced by [`encaps`] and recovered by [`decaps`].
@@ -88,8 +88,8 @@ pub use hash::SharedKey;
 // KEM key types and entry points, flattened to the crate root so callers write
 // `hqcr::keygen` / `hqcr::encaps` / `hqcr::decaps` rather than reaching into
 // `hqcr::kem::`.
-pub use kem::{DecapsulationKey, PublicKey};
 pub use kem::{decaps, encaps, keygen};
+pub use kem::{DecapsulationKey, PublicKey};
 
 // ── Zeroize audit: compile-time guard (19b, Layer 2) ──────────────────────────
 //

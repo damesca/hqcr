@@ -164,11 +164,11 @@ fn summarize(
     let t = trials as f64;
     let expected_p = weight as f64 / n as f64;
     let exp_count = expected_p * t; // expected set-count per position
-    // Variance of a Binomial(T, p) count is T·p·(1−p). Using this as the
-    // chi-square denominator gives E[χ²/dof] ≈ 1.0 for all sampler types,
-    // including sample_uniform (p=0.5). The old denominator T·p was correct
-    // only when p≪1 (fixed-weight samplers); for p=0.5 it halved every term,
-    // making χ²/dof≈0.5 even for a perfectly uniform sampler.
+                                    // Variance of a Binomial(T, p) count is T·p·(1−p). Using this as the
+                                    // chi-square denominator gives E[χ²/dof] ≈ 1.0 for all sampler types,
+                                    // including sample_uniform (p=0.5). The old denominator T·p was correct
+                                    // only when p≪1 (fixed-weight samplers); for p=0.5 it halved every term,
+                                    // making χ²/dof≈0.5 even for a perfectly uniform sampler.
     let chi2_variance = (t * expected_p * (1.0 - expected_p)).max(f64::EPSILON);
 
     // Per-position probability stats.
@@ -209,8 +209,7 @@ fn summarize(
     }
 
     // Histogram of per-position set-counts.
-    let (count_hist, count_mean, count_std) =
-        build_count_hist(counts, min_c, max_c, t);
+    let (count_hist, count_mean, count_std) = build_count_hist(counts, min_c, max_c, t);
 
     // Ideal binomial overlay: each position is Binomial(trials, expected_p).
     let binom_mean = exp_count;
@@ -238,12 +237,7 @@ fn summarize(
     }
 }
 
-fn build_count_hist(
-    counts: &[u64],
-    min_c: u64,
-    max_c: u64,
-    t: f64,
-) -> (Vec<(f64, u64)>, f64, f64) {
+fn build_count_hist(counts: &[u64], min_c: u64, max_c: u64, t: f64) -> (Vec<(f64, u64)>, f64, f64) {
     let buckets = COUNT_BUCKETS;
     let span = (max_c - min_c).max(1);
     let mut hist = vec![0u64; buckets];
@@ -264,8 +258,7 @@ fn build_count_hist(
         .into_iter()
         .enumerate()
         .map(|(i, freq)| {
-            let center =
-                min_c as f64 + (i as f64 + 0.5) * (span as f64 + 1.0) / buckets as f64;
+            let center = min_c as f64 + (i as f64 + 0.5) * (span as f64 + 1.0) / buckets as f64;
             (center, freq)
         })
         .collect();

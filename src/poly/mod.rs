@@ -8,12 +8,12 @@
 // Word ordering: little-endian — bit i lives in words[i/64] at position i%64.
 // Only the first N bits are meaningful; bits N..MAX_N_WORDS*64 are always zero.
 
-pub mod sampling;
 pub mod mul;
+pub mod sampling;
 
+use crate::params::HqcParams;
 use core::marker::PhantomData;
 use zeroize::{Zeroize, ZeroizeOnDrop};
-use crate::params::HqcParams;
 
 /// Maximum N_WORDS across all parameter sets (HQC-256: ceil(57637/64) = 901).
 pub(crate) const MAX_N_WORDS: usize = 901;
@@ -34,7 +34,10 @@ pub struct Poly<P: HqcParams> {
 // bare `P: HqcParams` bound.
 impl<P: HqcParams> Clone for Poly<P> {
     fn clone(&self) -> Self {
-        Self { words: self.words, _p: PhantomData }
+        Self {
+            words: self.words,
+            _p: PhantomData,
+        }
     }
 }
 
@@ -42,13 +45,10 @@ impl<P: HqcParams> Poly<P> {
     /// Returns the zero polynomial.
     #[inline]
     pub fn zero() -> Self {
-        Self { words: [0u64; MAX_N_WORDS], _p: PhantomData }
-    }
-
-    /// Returns the number of active u64 words for this parameter set.
-    #[inline(always)]
-    pub(crate) fn n_words() -> usize {
-        P::N_WORDS
+        Self {
+            words: [0u64; MAX_N_WORDS],
+            _p: PhantomData,
+        }
     }
 
     // ── Bit access ────────────────────────────────────────────────────────────
@@ -137,8 +137,8 @@ impl<P: HqcParams> Poly<P> {
         let mask = (1u64 << last_bit) - 1;
 
         let overflow = self.words[last_idx] >> last_bit;
-        self.words[last_idx] &= mask;   // zero out the bits above N-1
-        self.words[0] ^= overflow;      // fold them into the bottom of the ring
+        self.words[last_idx] &= mask; // zero out the bits above N-1
+        self.words[0] ^= overflow; // fold them into the bottom of the ring
     }
 
     // ── Hamming weight ────────────────────────────────────────────────────────
@@ -263,14 +263,14 @@ mod tests {
         // N_WORDS * 64 - N = 277*64 - 17669 = 17728 - 17669 = 59 padding bits.
         // We intentionally bypass set_bit (which would panic) to write raw:
         p.words[Hqc128::N_WORDS - 1] = u64::MAX; // includes overflow bits
-        // hamming_weight sums all N_WORDS words — so it WILL count overflow.
-        // This test verifies the caller (mul.rs / sampling.rs) always calls
-        // reduce() before hamming_weight(), OR that hamming_weight is only
-        // called on valid (reduced) polys. Document the contract here:
-        // hamming_weight counts N_WORDS words, caller must ensure upper bits = 0.
+                                                 // hamming_weight sums all N_WORDS words — so it WILL count overflow.
+                                                 // This test verifies the caller (mul.rs / sampling.rs) always calls
+                                                 // reduce() before hamming_weight(), OR that hamming_weight is only
+                                                 // called on valid (reduced) polys. Document the contract here:
+                                                 // hamming_weight counts N_WORDS words, caller must ensure upper bits = 0.
         let raw_count = p.hamming_weight();
         assert_eq!(raw_count, 64); // full word = 64 set bits
-        // After mask:
+                                   // After mask:
         p.reduce();
         // reduce only folds if there's overflow, but doesn't zero them out for
         // a fully-set last word — let's check the actual contract.

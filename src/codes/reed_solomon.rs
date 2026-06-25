@@ -37,7 +37,7 @@
 //   5. Correct received word; extract message from the high positions.
 //   Returns None when the error pattern is uncorrectable (> δ errors).
 
-use crate::gf::{gf_add, gf_mul, gf_div, gf_inv, gf_poly_eval, GF_EXP};
+use crate::gf::{gf_add, gf_div, gf_mul, gf_poly_eval, GF_EXP};
 
 // ── Generator polynomial ──────────────────────────────────────────────────────
 
@@ -51,8 +51,8 @@ pub(crate) fn rs_generator(delta: usize) -> Vec<u8> {
     g[0] = 1; // start with g(x) = 1
     let mut deg = 0usize;
 
-    for i in 1..=nk {
-        let root = GF_EXP[i]; // α^i
+    for &root in &GF_EXP[1..=nk] {
+        // root = α^i for each successive i
         deg += 1;
         // Multiply g(x) by (x - root) = (x + root) in char 2.
         // new g[j] = g[j-1] + root * g[j], processed high→low to avoid clobbering.
@@ -88,9 +88,7 @@ pub fn rs_encode(msg: &[u8], codeword: &mut [u8], delta: usize) {
     // Dividend d(x) = M(x) · x^{nk}, little-endian, length n1:
     //   d[nk + t] = msg[t]; the low nk coefficients start at 0.
     let mut d = vec![0u8; n1];
-    for t in 0..k {
-        d[nk + t] = msg[t];
-    }
+    d[nk..(nk + k)].copy_from_slice(&msg[..k]);
 
     // Reduce d modulo g(x): cancel the leading coefficient at each degree from
     // n1-1 down to nk. g is monic of degree nk, so subtracting c·x^{i-nk}·g(x)
@@ -105,7 +103,7 @@ pub fn rs_encode(msg: &[u8], codeword: &mut [u8], delta: usize) {
     }
 
     codeword[..nk].copy_from_slice(&d[..nk]); // parity
-    codeword[nk..].copy_from_slice(msg);      // message
+    codeword[nk..].copy_from_slice(msg); // message
 }
 
 // ── Syndrome computation ──────────────────────────────────────────────────────
@@ -398,11 +396,12 @@ mod tests {
             let msg: Vec<u8> = (0..k as u8).collect();
             let mut cw = encode(&msg, n1, delta);
             // δ errors at distinct positions, all non-zero.
-            let errors: Vec<(usize, u8)> =
-                (0..delta).map(|i| (i, (i as u8).wrapping_add(1).wrapping_mul(7) | 1)).collect();
+            let errors: Vec<(usize, u8)> = (0..delta)
+                .map(|i| (i, (i as u8).wrapping_add(1).wrapping_mul(7) | 1))
+                .collect();
             inject_errors(&mut cw, &errors);
-            let recovered = rs_decode(&cw, k, delta)
-                .unwrap_or_else(|| panic!("should correct {delta} errors"));
+            let recovered =
+                rs_decode(&cw, k, delta).unwrap_or_else(|| panic!("should correct {delta} errors"));
             assert_eq!(recovered, msg, "delta={delta}");
         }
     }
@@ -419,7 +418,10 @@ mod tests {
         let errors: Vec<(usize, u8)> = (0..delta).map(|i| (nk + (i % k), 0x5A | 1)).collect();
         // Distinct positions only:
         let mut seen = std::collections::HashSet::new();
-        let errors: Vec<(usize, u8)> = errors.into_iter().filter(|&(p, _)| seen.insert(p)).collect();
+        let errors: Vec<(usize, u8)> = errors
+            .into_iter()
+            .filter(|&(p, _)| seen.insert(p))
+            .collect();
         inject_errors(&mut cw, &errors);
         let recovered = rs_decode(&cw, k, delta).expect("decode failed");
         assert_eq!(recovered, msg);
@@ -435,8 +437,10 @@ mod tests {
             // δ+1 errors at distinct positions.
             let errors: Vec<(usize, u8)> = (0..=delta).map(|i| (i, 0xFF)).collect();
             inject_errors(&mut cw, &errors);
-            assert!(rs_decode(&cw, k, delta).is_none(),
-                "delta={delta}: δ+1 errors must be uncorrectable");
+            assert!(
+                rs_decode(&cw, k, delta).is_none(),
+                "delta={delta}: δ+1 errors must be uncorrectable"
+            );
         }
     }
 
@@ -454,8 +458,14 @@ mod tests {
         let sigma = berlekamp_massey(&s);
         let roots = chien_search(&sigma, n1);
         let positions: Vec<usize> = roots.iter().map(|&(p, _)| p).collect();
-        assert!(positions.contains(&3), "should find position 3: {positions:?}");
-        assert!(positions.contains(&10), "should find position 10: {positions:?}");
+        assert!(
+            positions.contains(&3),
+            "should find position 3: {positions:?}"
+        );
+        assert!(
+            positions.contains(&10),
+            "should find position 10: {positions:?}"
+        );
         assert_eq!(positions.len(), 2);
     }
 
@@ -468,13 +478,17 @@ mod tests {
             let msg: Vec<u8> = (0..k as u8).collect();
             let cw = encode(&msg, n1, delta);
             let mut received = cw.clone();
-            let errors: Vec<(usize, u8)> =
-                (0..num_errors).map(|i| (i, (i as u8).wrapping_add(1) | 1)).collect();
+            let errors: Vec<(usize, u8)> = (0..num_errors)
+                .map(|i| (i, (i as u8).wrapping_add(1) | 1))
+                .collect();
             inject_errors(&mut received, &errors);
             let (s, _) = syndromes(&received, delta);
             let sigma = berlekamp_massey(&s);
-            assert_eq!(sigma.len() - 1, num_errors,
-                "deg σ should equal error count {num_errors}");
+            assert_eq!(
+                sigma.len() - 1,
+                num_errors,
+                "deg σ should equal error count {num_errors}"
+            );
         }
     }
 }

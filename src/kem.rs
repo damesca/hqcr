@@ -220,8 +220,7 @@ pub fn decaps<P: HqcParams>(dk: &DecapsulationKey<P>, c: &[u8]) -> SharedKey {
     // the timing of both is independent of decode success.
     let m_prime = pke::decrypt::<P>(&dk.dk_pke, &u, &v);
     let decode_ok = Choice::from(m_prime.is_some() as u8);
-    let m_bytes: Zeroizing<Vec<u8>> =
-        Zeroizing::new(m_prime.unwrap_or_else(|| vec![0u8; P::K]));
+    let m_bytes: Zeroizing<Vec<u8>> = Zeroizing::new(m_prime.unwrap_or_else(|| vec![0u8; P::K]));
 
     // Re-derive (K', θ') and re-encrypt under the reused salt.
     let (mut k_prime, theta) = hash::g(&ek_hash, &m_bytes, &salt);
@@ -305,7 +304,9 @@ mod tests {
         let seed_kem = [0x42u8; SEED_BYTES];
         let (ek, dk) = keygen_from_seed::<P>(&seed_kem);
 
-        let m: Vec<u8> = (0..P::K).map(|i| (i as u8).wrapping_mul(7).wrapping_add(1)).collect();
+        let m: Vec<u8> = (0..P::K)
+            .map(|i| (i as u8).wrapping_mul(7).wrapping_add(1))
+            .collect();
         let salt = [0x17u8; SALT_BYTES];
         let (k_enc, c) = encaps_deterministic::<P>(&ek, &m, &salt);
         assert_eq!(c.len(), P::CT_BYTES);
@@ -315,11 +316,17 @@ mod tests {
     }
 
     #[test]
-    fn kem_roundtrip_128() { kem_roundtrip::<Hqc128>(); }
+    fn kem_roundtrip_128() {
+        kem_roundtrip::<Hqc128>();
+    }
     #[test]
-    fn kem_roundtrip_192() { kem_roundtrip::<Hqc192>(); }
+    fn kem_roundtrip_192() {
+        kem_roundtrip::<Hqc192>();
+    }
     #[test]
-    fn kem_roundtrip_256() { kem_roundtrip::<Hqc256>(); }
+    fn kem_roundtrip_256() {
+        kem_roundtrip::<Hqc256>();
+    }
 
     // ── Random entry points round-trip ────────────────────────────────────────
 
@@ -374,7 +381,10 @@ mod tests {
 
         // Deterministic: decapsulating the same tampered c again gives the same key.
         let k_rej2 = decaps::<P>(&dk, &c);
-        assert_eq!(k_rej, k_rej2, "implicit-rejection key must be deterministic");
+        assert_eq!(
+            k_rej, k_rej2,
+            "implicit-rejection key must be deterministic"
+        );
 
         // And it equals J(H(ek), σ, c) directly.
         let ek_hash = hash::h_ek(&ek.to_bytes());
@@ -383,11 +393,17 @@ mod tests {
     }
 
     #[test]
-    fn implicit_rejection_128() { implicit_rejection::<Hqc128>(); }
+    fn implicit_rejection_128() {
+        implicit_rejection::<Hqc128>();
+    }
     #[test]
-    fn implicit_rejection_192() { implicit_rejection::<Hqc192>(); }
+    fn implicit_rejection_192() {
+        implicit_rejection::<Hqc192>();
+    }
     #[test]
-    fn implicit_rejection_256() { implicit_rejection::<Hqc256>(); }
+    fn implicit_rejection_256() {
+        implicit_rejection::<Hqc256>();
+    }
 
     // ── Malformed ciphertexts never panic ─────────────────────────────────────
 

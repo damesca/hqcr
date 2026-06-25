@@ -163,7 +163,11 @@ mod tests {
     #[test]
     fn distributivity() {
         // a*(b+c) == a*b + a*c  for a few triples
-        let triples = [(0x53u8, 0xCAu8, 0x7Fu8), (0x01, 0xFF, 0xAB), (0x80, 0x80, 0x01)];
+        let triples = [
+            (0x53u8, 0xCAu8, 0x7Fu8),
+            (0x01, 0xFF, 0xAB),
+            (0x80, 0x80, 0x01),
+        ];
         for (a, b, c) in triples {
             let lhs = gf_mul(a, gf_add(b, c));
             let rhs = gf_add(gf_mul(a, b), gf_mul(a, c));
