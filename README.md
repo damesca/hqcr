@@ -39,6 +39,8 @@ with implicit rejection (`SFO⊥_m`) layered over the IND-CPA PKE.
 - **Spec:** [HQC specifications, 22/08/2025](https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf)
 - **Paper:** Aguilar-Melchor et al., *Efficient Encryption from Random
   Quasi-Cyclic Codes*, IEEE Trans. Inf. Theory 64(5), 2018 (arXiv:1612.05572)
+- **HQC internals:** [`docs/HQC.md`](docs/HQC.md) — concise walkthrough of the algebra, QCSD hard problem, PKE/KEM structure, and parameters
+- **FO transform:** [`docs/FO.md`](docs/FO.md) — how the Fujisaki-Okamoto transform works and the SFO⊥_m variant used here
 
 ## Code structure
 
@@ -330,6 +332,49 @@ r1/r2/e) should both read χ²/dof ≈ 1.0. The `mod` sampler may show a barely
 visible excess at the very lowest positions (its backward duplicate-resolution
 step maps collisions to small indices), but it is too small to see at typical
 trial counts.
+
+## Benchmark results
+
+Criterion measurements (100 samples). Times shown as `estimate ± half-CI`.
+The ± value is half the width of Criterion's confidence interval, not the
+standard deviation.
+
+**Hardware**: i7-13620H 2.40 GHz processor, 16 GB RAM
+
+### Portable build (`cargo bench`)
+
+Software carry-less multiply leaf (no `pclmulqdq`).
+
+| Operation | HQC-128 | HQC-192 | HQC-256 |
+|:--|--:|--:|--:|
+| `keygen` | 31.4 µs ± 0.4 µs | 68.0 µs ± 0.2 µs | 124 µs ± 1.5 µs |
+| `encaps` | 0.532 ms ± 0.002 ms | 1.524 ms ± 0.007 ms | 3.023 ms ± 0.010 ms |
+| `decaps` | 2.399 ms ± 0.012 ms | 7.001 ms ± 0.025 ms | 16.97 ms ± 0.09 ms |
+
+`decaps` dominates because it runs a full `PKE.Decrypt` (the dense×dense
+ring multiply) followed by a re-encryption check (`PKE.Encrypt`). `encaps`
+runs only `PKE.Encrypt` (sparse×dense, much cheaper). `keygen` performs two
+sparse×dense multiplies plus the RMRS encode.
+
+### With `pclmulqdq` (`RUSTFLAGS="-C target-feature=+pclmulqdq" cargo bench`)
+
+Hardware carry-less multiply leaf via the `pclmulqdq` instruction.
+
+| Operation | HQC-128 | HQC-192 | HQC-256 |
+|:--|--:|--:|--:|
+| `keygen` | 31.4 µs ± 0.2 µs | 68.5 µs ± 0.4 µs | 124.9 µs ± 0.7 µs |
+| `encaps` | 0.530 ms ± 0.002 ms | 1.539 ms ± 0.008 ms | 3.040 ms ± 0.016 ms |
+| `decaps` | 0.774 ms ± 0.003 ms | 2.118 ms ± 0.013 ms | 4.379 ms ± 0.022 ms |
+
+`keygen` and `encaps` are unchanged — they use the sparse×dense multiply
+(Mode A), which does not call the carry-less leaf. The entire gain is on
+`decaps`, which calls the dense×dense constant-time multiply (Mode B) twice:
+
+| | HQC-128 | HQC-192 | HQC-256 |
+|:--|--:|--:|--:|
+| `decaps` portable | 2.399 ms | 7.001 ms | 16.97 ms |
+| `decaps` pclmulqdq | 0.774 ms | 2.118 ms | 4.379 ms |
+| **speedup** | **3.1×** | **3.3×** | **3.9×** |
 
 ## License
 
