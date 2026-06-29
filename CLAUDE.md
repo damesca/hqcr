@@ -266,20 +266,30 @@ the XOF — used for the public `h`.
 
 ### `gf.rs`
 
-GF(2^8) with primitive polynomial `p(x) = x⁸ + x⁴ + x³ + x² + 1`
-(hex `0x11D`). Precompute two tables of 256 `u8` entries:
-- `GF_LOG[256]`: discrete log base α (undefined for 0, set to sentinel)
-- `GF_EXP[512]`: antilog, doubled to avoid modular reduction in multiply
+GF(2^8) with primitive polynomial `p(x) = x⁸ + x⁴ + x³ + x² + 1` (hex `0x11D`).
+
+**Arithmetic is branch-free and table-free (Step 20a)** — required because the RS
+decoder feeds these functions the secret-derived decoded codeword:
 
 ```rust
-pub fn gf_mul(a: u8, b: u8) -> u8 {
-    if a == 0 || b == 0 { return 0; }
-    GF_EXP[(GF_LOG[a as usize] as usize + GF_LOG[b as usize] as usize) % 255]
-}
-pub fn gf_inv(a: u8) -> u8 { GF_EXP[255 - GF_LOG[a as usize] as usize] }
+// carry-less multiply (8 masked partial products) + branch-free reduce
+pub fn gf_mul(a: u8, b: u8) -> u8 { /* no `if a==0||b==0`, no table loads */ }
+// fixed addition chain a^254 = a^{-1}; gf_inv(0) == 0 (branchless sentinel)
+pub fn gf_inv(a: u8) -> u8 { /* gf_sq/gf_mul only */ }
+pub fn gf_div(a: u8, b: u8) -> u8 { gf_mul(a, gf_inv(b)) }
 ```
 
-All RS operations go through `gf.rs`. Zero is a special case everywhere.
+Helpers `gf_reduce` (clears bits 14..8 top-down mod `0x11D`) and `gf_sq`
+(bit-spread + reduce) are also branch-free. Zero is handled branchlessly
+everywhere (no value-dependent control flow, no secret-indexed loads).
+
+The precomputed tables remain but are **public-index only**:
+- `GF_EXP[512]`: antilog (doubled), indexed by public loop counters in
+  `reed_solomon.rs` (generator precompute, syndrome/Chien eval).
+- `GF_LOG[256]`: discrete log base α — no longer used by arithmetic; retained
+  under `#[allow(dead_code)]` for the additive FFT's public basis (Step 20c).
+
+All RS operations go through `gf.rs`.
 
 ### `codes/reed_muller.rs`
 
@@ -313,15 +323,26 @@ do not derive them at runtime.
 and parity fills the remaining `n1 - k` positions. Standard polynomial
 long division over GF(2^8).
 
-**Decoding:**
-1. Compute `2δ` syndromes: `S_j = received(α^j)` for `j = 1..2δ`
-2. Berlekamp-Massey → error locator polynomial `σ(x)`
-3. Chien search: evaluate `σ(α^{-i})` for all `i ∈ [0, n1)` → error positions
-4. Forney algorithm → error values (over GF(2^8); always 1 for binary codes
-   but RS operates on 8-bit symbols so values are non-trivial)
+**Decoding (constant-time, Steps 20a–c):**
+1. Compute `2δ` syndromes: `S_j = received(α^j)` for `j = 1..2δ` (always in full;
+   no "all-zero ⇒ no errors" fast path).
+2. Berlekamp-Massey → error locator polynomial `σ(x)` (masked/branchless, 20b).
+3. Build `Ω = S·σ mod x^{2δ}` and `σ'`; then a **branchless full scan** over every
+   position `i ∈ [0, n1)`: test `σ(α^{-i}) == 0` with `subtle::ct_eq`, compute the
+   Forney value `Ω(α^{-i})/σ'(α^{-i})`, and XOR a `conditional_select`-masked
+   correction into `corrected[i]` (store index = public counter). This replaces the
+   old Chien search + Forney (which used a conditional `push` and a secret-length
+   `Vec`).
+4. Validity (corrected has zero syndromes ∧ `deg ≤ δ` ∧ `#roots == deg`) is folded
+   to one bit; the lone `Some`/`None` branch.
 
-**CT requirement:** Chien search must iterate over all `n1` candidates (46, 56,
-or 90) without early exit, even after finding `deg(σ)` roots.
+> **Perf TODO:** the full scan is `O(n1·δ)` GF-muls. A recursive additive FFT
+> (`codes/fft.rs`, evaluating σ at all 2⁸ points in `O(2⁸·8)`) is a deferred
+> speed-only optimization — see Step 20c. The current code is already constant-time.
+
+**CT requirement:** the decode path must run the same fixed sequence for every
+input — no syndrome fast path, no early exit, no secret-dependent branch or store
+address; only the final 1-bit Some/None may depend on the data.
 
 ### `parsing.rs`
 
@@ -751,6 +772,226 @@ behavioural change, so `cargo test` and the KAT suite must still pass unchanged.
 | 19a | Constant-time audit (manual + timing + asm/miri) | ✅ done (see `docs/SECURITY-AUDIT.md`) |
 | 19b | Zeroize audit | ✅ done (see `docs/SECURITY-AUDIT.md`) |
 | 19c/d | lint, crate metadata | ⬜ deferred |
+| 20 | Constant-time RS/GF decoder (remediate 19a headline + G3) | ✅ done — 20a–e (decoder `\|t\|` 622→0.82; G3 wiped; see `docs/SECURITY-AUDIT.md`) |
+| 20c-opt | Additive-FFT root finder (`codes/fft.rs`) — perf-only | ⬜ TODO (recover the ~3–4× decaps cost; decoder already CT) |
+| 20-asm | Layer-3 asm/miri pass over the Step-20 decoder | ⬜ follow-up (verified by source review + dudect + KAT so far) |
+
+---
+
+## Step 20 — Constant-time Reed-Solomon / GF(2⁸) decoder ✅ COMPLETE (20a–e)
+
+**Outcome:** the decryption-side timing oracle is closed — isolated decoder `|t|`
+622 → 0.82, full `decaps` 5.5 → 1.29 (all `< 5`); G3 codec buffers wiped; KAT
+byte-identical. Cost: `decaps` ≈3.2×–4.0× slower (corrected from the original
+estimate — see 20e). Deferred follow-ups: **20c-opt** (additive-FFT perf
+recovery) and **20-asm** (Layer-3 asm/miri). Full write-up in
+`docs/SECURITY-AUDIT.md`.
+
+Remediates the **headline CT limitation** from Step 19a (RS decoder + `gf.rs`
+table lookups leak on the secret-derived decoded codeword) **and** the matching
+zeroize gap **G3**. The official HQC reference (`c_implementations/reference-hqc-1`)
+is fully constant-time here and gives a KAT-blessed recipe to port — see the
+"Remediation recipe" section of `docs/SECURITY-AUDIT.md`. This is a **behavioural
+rewrite** of the decode path (the first since Step 19's verify-only scope), so the
+KAT suite is the gate: it must still pass byte-for-byte after every sub-step.
+
+> Reminder: never run `cargo` here. Provide the command for the user to run.
+> The KAT suite (`cargo test --features kat`) is the correctness oracle — run it
+> after **each** sub-step, not just at the end. Keep the old non-CT functions as
+> `#[cfg(test)]` oracles and cross-check the new CT versions against them on random
+> inputs (the same pattern Step 17 used for `mul_dense_ct_bitwise`).
+
+Work bottom-up (each sub-step gated by KAT + the previous oracle cross-check):
+
+### 20a — Branch-free GF(2⁸) arithmetic (`gf.rs`) ✅ done
+
+Replaced the table-indexed, zero-branching `gf_mul`/`gf_inv`/`gf_div` (the C2/C1
+leak source) with value-independent versions, mirroring the reference `gf.c`.
+
+What was done:
+1. ✅ `gf_mul`: branch-free **carry-less multiply** (8 masked-XOR partial products,
+   `deg ≤ 14` in a `u16`, **no** `if a==0||b==0`) + new branch-free `gf_reduce`
+   mod `0x11D` (clears bits 14..8 top-down, since `0x11D << (k−8)` has its leading
+   term exactly at bit `k`). Added a branch-free `gf_sq` (bit-spread + reduce).
+2. ✅ `gf_inv`: **fixed addition chain** `2,3,4,7,11,15,30,60,120,127,254`
+   (`a²⁵⁴ = a⁻¹`), using only `gf_sq`/`gf_mul`. `gf_inv(0) == 0` is a branchless
+   sentinel (0 has no inverse; every square/mul of 0 stays 0 — matches the
+   reference). `gf_div(a,b) = gf_mul(a, gf_inv(b))`, fully branch-free (drops the
+   old `if a==0` and the debug panic on 0).
+3. ✅ Tables reclassified: `GF_EXP` retained — used only on **public**-index paths
+   in `reed_solomon.rs` (generator precompute, syndrome eval, Chien, all indexed by
+   public loop counters). `GF_LOG` is no longer used by arithmetic; kept under
+   `#[allow(dead_code)]` for the additive FFT's public basis in 20c.
+
+Tests added (the Step-17 oracle pattern): the old table-based `gf_mul`/`gf_inv` are
+retained as `#[cfg(test)]` oracles, and exhaustive cross-checks assert the new
+branch-free versions agree on **all 256² multiply pairs** and **all 255 inverses**,
+plus `gf_sq == gf_mul(a,a)` over all elements and the `gf_inv(0)/gf_div(_,0)`
+sentinels.
+
+> CT note: this closes the **C2 secret-table-index** leak and the `gf_mul`/`gf_div`
+> **C1 zero-branch** leak. The decoder is **not yet fully CT** — Chien's conditional
+> `push` and the BM syndrome branches remain (20b/20c). Do **not** flip the
+> `docs/SECURITY-AUDIT.md` verdict rows until 20c lands.
+
+### 20b — Constant-time Berlekamp-Massey (`reed_solomon.rs`) ✅ done
+
+Rewrote `berlekamp_massey` to the masked in-place form of the reference
+`compute_elp` (kills the C1 discrepancy / register-length branches and the C3
+secret loop bound).
+
+What was done:
+1. ✅ Fixed `2δ` outer iterations; `sigma` and `X·σ_p` updated **in place** over
+   fixed-size buffers (`δ+1`), with a once-per-iteration `sigma_copy` save instead
+   of the old per-iteration `sigma.clone()`.
+2. ✅ Every branch (`if d == 0` / `else if 2l ≤ i` / `else`) replaced by a single
+   masked merge: `mask1 = (d ≠ 0)`, `mask2 = (deg_X·σ_p > deg_σ)`, and
+   `mask12 = black_box(mask1 & mask2)` ("register length grew"). The
+   `core::hint::black_box` barrier stops LLVM re-deriving a branch (the reference's
+   `volatile`). `pp`/`d_p`/`X·σ_p`/`deg_σ`/`deg_σ_p` are all XOR-mask updates.
+3. ✅ Both inner loops run to the **public** bound `min(μ+1, δ)` (sigma update and
+   discrepancy recompute), never to the secret register length. `gf_inv(d_p)` runs
+   unconditionally (20a's `gf_inv(0)=0` makes the zero case branch-free).
+
+Signature changed to `(Vec<u8>, usize)` = (full-length σ of `δ+1` with zero
+padding above the degree, deg σ). `rs_decode` now uses the returned degree as
+`num_errors`; `chien_search`/`forney` consume the full σ unchanged (trailing
+zeros don't affect evaluation).
+
+Tests added (oracle pattern): the old branch-based BM is retained as
+`#[cfg(test)] berlekamp_massey_ref`, and `ct_berlekamp_massey_matches_reference`
+asserts the new CT version returns the identical locator **and** degree for every
+correctable pattern `e ∈ [1, δ]` across all three codes (the locator is unique for
+≤ δ errors). All RS/PKE/KEM/KAT tests pass unchanged.
+
+> CT note: this closes the BM **C1** (discrepancy/length branches) and **C3**
+> (secret loop bound) leaks. The decoder is **still not fully CT** — `chien_search`'s
+> conditional `roots.push` (C1) and its secret-length `Vec` (G3), plus the
+> `rs_decode` `num_errors`/root-count branches, remain. Those fall to 20c (additive
+> FFT). Do **not** flip the `docs/SECURITY-AUDIT.md` verdict rows until 20c lands.
+
+### 20c — Constant-time root finding, replacing Chien search (`reed_solomon.rs`) ✅ done
+
+Removed the conditional-`push` Chien scan (C1), its secret-length `Vec` (G3), and
+**all** the remaining secret-dependent branches in `rs_decode` (the syndrome fast
+path and the `num_errors`/root-count early returns). The whole decode pipeline now
+runs the same fixed instruction/memory-access sequence for every input.
+
+> ⚠️ **Approach note — full evaluation now, additive FFT is a TODO.** The original
+> plan was to port the Gao–Mateer additive FFT (`fft.c`). I deliberately did **not**
+> do that yet: the FFT's only benefit is *speed*, and the decoder is a negligible
+> fraction of decaps (see the perf note in 20e). A constant-time **full evaluation**
+> (evaluate σ at α^{−i} for every position) removes the *identical* leaks with far
+> less correctness risk and is trivially verifiable against the existing decode
+> tests. No `src/codes/fft.rs` was created.
+>
+> **TODO (deferred perf optimization, not a CT/correctness gap):** port the
+> recursive additive FFT into `src/codes/fft.rs` and swap it in behind the same
+> `rs_decode` interface (it evaluates σ at all 2⁸ points in `O(2⁸·8)` vs the current
+> `O(n1·δ)` full scan). Gate on KAT + cross-check against the current full-scan
+> decoder as the oracle. Purely a speed change; the current code is already
+> constant-time and correct.
+
+What was done:
+1. ✅ `syndromes` made branchless (OR-accumulate the "any non-zero" flag, no early
+   exit); `rs_decode` no longer takes the `if !has_error` fast path.
+2. ✅ Branchless root finding + correction inside `rs_decode`: scan **every**
+   position `i ∈ [0, n1)`, test `σ(α^{−i}).ct_eq(0)` (`subtle`), compute the Forney
+   value `Ω(α^{−i})/σ'(α^{−i})`, and XOR a `conditional_select`-masked correction
+   into `corrected[i]`. The store index `i` is the **public** loop counter (never an
+   error position); root count is accumulated with `Choice::unwrap_u8`. Replaces
+   `chien_search` + `forney` (both deleted from `src/`; a tiny naive Chien is kept
+   `#[cfg(test)]` for the position sanity check).
+3. ✅ `error_evaluator` (Ω = S·σ mod x^{2δ}) and `formal_derivative` (σ') helpers
+   built once over fixed-size buffers; the Forney math is identical to the old
+   `forney`, so values match at roots and are masked to 0 elsewhere.
+4. ✅ Validity folded to **one bit** — `corrected` has zero syndromes ∧ `deg ≤ δ` ∧
+   `#roots == deg` — computed branchlessly; the lone `Some`/`None` branch. This
+   reproduces the old decision exactly (each old reject path maps to a sub-condition).
+
+Interface unchanged (`rs_decode` still returns `Option<Vec<u8>>`), so `codes::decode`
+/ `pke::decrypt` / `kem::decaps` and their tests are untouched. The residual 1-bit
+Some/None is exactly what `kem::decaps` already consumes as `decode_ok`, folded with
+the CT re-encryption check (the real security gate — same design as the reference).
+
+Tests added: `ct_decode_corrects_random_patterns` (40 random ≤ δ patterns × all
+three codes) exercises the new root finder + inline Forney beyond the hand-picked
+patterns. All RS/codec/PKE/KEM/KAT tests pass unchanged.
+
+> CT note: with 20a+20b+20c the RS/GF decode path is now constant-time end-to-end —
+> the only remaining 20-series item before flipping the `docs/SECURITY-AUDIT.md`
+> verdict rows is the **20d** zeroize pass + the **20e** timing re-measurement.
+
+### 20d — Zeroize the codec buffers (closes G3) ✅ done
+
+Wrapped every secret-derived **heap buffer** on the encode/decode path in
+`Zeroizing`, so each wipes on drop along every exit path (including panics). All
+are fixed-size (no realloc), so defeater **D2** no longer applies to them.
+
+What was done:
+1. ✅ `reed_solomon.rs` `rs_decode`: `s` (syndromes), `σ`, `omega`, `sigma_prime`,
+   `corrected`, `s2` → `Zeroizing`.
+2. ✅ `reed_solomon.rs` `berlekamp_massey`: scratch `x_sigma_p`, `sigma_copy` →
+   `Zeroizing` (the returned `σ` is wrapped by `rs_decode`, same heap buffer).
+3. ✅ `reed_solomon.rs` `rs_encode`: the dividend `d` (holds the raw message during
+   division) → `Zeroizing`.
+4. ✅ `codes/mod.rs` `encode` (`rs_cw`, `buf`) and `decode` (`buf` = `poly_to_bytes`
+   output, `rs_cw`) → `Zeroizing`.
+
+Buffers that are *returned* (`syndromes`→`s`, BM→`σ`, `error_evaluator`→`omega`,
+`formal_derivative`→`sigma_prime`, `poly_to_bytes`→`buf`) are wrapped at the call
+site, so the same heap allocation is wiped on the caller's drop. No signatures
+changed — the wrappers deref-coerce to `&[u8]`/`&mut [u8]` exactly like the
+existing `m_bytes: Zeroizing<Vec<u8>>` pattern in `kem.rs` — so callers and all
+tests are untouched, and the change is logic-free (KAT byte-identical).
+
+Out of scope (left as-is): the RM decoder (`reed_muller.rs`) uses fixed **stack**
+arrays, not heap `Vec`s, so it is not a realloc-leak (D2) surface; the generator
+`g` in `rs_generator` is derived from public `delta` (not secret). The recovered
+**message** itself is still wrapped at the `kem::decaps` layer (`m_bytes`).
+
+> Note: the original 20d sketch mentioned FFT `w`/error arrays and a `z`
+> polynomial — those belong to the deferred additive-FFT path (20c-opt) that was
+> not built; the actual decoder's secret buffers (listed above) are what got
+> wiped.
+
+### 20e — Verify ✅ done
+
+Measured outcomes (all gates green):
+
+1. ✅ `cargo test --features kat` — byte-for-byte, all three sets.
+2. ✅ `cargo test` — oracle cross-checks (CT `gf`/BM vs retained old versions) +
+   `ct_decode_corrects_random_patterns`.
+3. ✅ `cargo test --features ct-audit --test ct_timing` (Hqc128, dudect Welch t):
+   - isolated `codes::decode` (the RS decoder): **`|t| = 0.82`** — down from
+     `~622` pre-20a; now indistinguishable from the CT canary.
+   - `mul_dense_ct` canary: `|t| = 1.10`.
+   - full `decaps`: **`|t| = 1.29`** — down from `~5.5`.
+   - All `< 5` ⇒ **no leak signal**. `docs/SECURITY-AUDIT.md` verdict rows flipped
+     ❌→✅ (RS decoder + GF), G3 → WIPED.
+4. ✅ `cargo bench --bench bench -- kem/decaps` — see corrected perf note below.
+
+**Performance note — CORRECTED (the earlier estimate was wrong).** The pre-Step-20
+estimate said "low single-digit % decaps slowdown" on the assumption the decoder
+was a tiny fraction of decaps. That was **measured to be wrong**: the old decoder
+was cheap *because* it used fast table lookups, so making GF branch-free
+(`gf_mul` ~10× slower, `gf_inv` addition-chain ~100× slower, called per-position in
+the full scan) turned the decoder into a *dominant* part of the RS path. Criterion
+shows `decaps` **≈3.2×–4.0× slower**:
+
+| set | before | after | change |
+|---|---|---|---|
+| hqc128 | ~0.78 ms | 2.54 ms | +225 % |
+| hqc192 | ~2.1 ms | 7.23 ms | +241 % |
+| hqc256 | ~4.4 ms | 17.29 ms | +295 % |
+
+Keygen and encaps are unaffected (they never decode). This is the price of closing
+the decryption-side timing oracle. Most of it is recoverable by the deferred
+**20c-opt** (additive-FFT root finder + batched inversions, replacing the
+`O(n1·δ)` full scan and the per-position `gf_inv`) — a pure speed change; the
+current code is already constant-time and KAT-correct. The decaps timing dilution
+note (`|t|` 622→5.5 pre-fix) reflected the *old* fast decoder and does not predict
+the post-fix cycle split.
 
 ---
 

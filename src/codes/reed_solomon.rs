@@ -29,15 +29,22 @@
 //     encode/decode call (negligible: RS runs once per KEM operation). The
 //     hardcoded constants can be reinstated later if cross-checked against KAT.
 //
-// Decoding pipeline:
-//   1. Syndromes S_j = received(α^j), j = 1..=2δ. All zero ⇒ no errors.
-//   2. Berlekamp-Massey → error locator σ(x), deg σ = number of errors.
-//   3. Chien search: σ(α^{-i}) for every i in 0..n1 (NO early exit, CT req).
-//   4. Forney: error values from Ω(x)=S(x)σ(x) mod x^{2δ} and σ'(x).
-//   5. Correct received word; extract message from the high positions.
-//   Returns None when the error pattern is uncorrectable (> δ errors).
+// Decoding pipeline (constant-time, Steps 20a–c — same fixed sequence for every
+// input, no syndrome fast path and no secret-dependent branch / memory address):
+//   1. Syndromes S_j = received(α^j), j = 1..=2δ (always computed in full).
+//   2. Berlekamp-Massey → error locator σ(x), deg σ = number of errors (masked,
+//      constant-time — see `berlekamp_massey`).
+//   3. Ω(x) = S(x)σ(x) mod x^{2δ} and σ'(x) for the Forney step.
+//   4. Branchless root finding + correction: scan every position i in 0..n1,
+//      test σ(α^{-i}) == 0 with `ct_eq`, and XOR a masked Forney correction into
+//      corrected[i] (store index i is the public loop counter). Replaces the old
+//      Chien search's conditional `push` (leak C1) and its secret-length `Vec`.
+//   5. Validity = corrected has zero syndromes ∧ deg ≤ δ ∧ #roots == deg, folded
+//      to one bit; the single Some/None branch. Returns None when uncorrectable.
 
-use crate::gf::{gf_add, gf_div, gf_mul, gf_poly_eval, GF_EXP};
+use crate::gf::{gf_add, gf_div, gf_inv, gf_mul, gf_poly_eval, GF_EXP};
+use subtle::{ConditionallySelectable, ConstantTimeEq};
+use zeroize::Zeroizing;
 
 // ── Generator polynomial ──────────────────────────────────────────────────────
 
@@ -86,8 +93,9 @@ pub fn rs_encode(msg: &[u8], codeword: &mut [u8], delta: usize) {
     let g = rs_generator(delta);
 
     // Dividend d(x) = M(x) · x^{nk}, little-endian, length n1:
-    //   d[nk + t] = msg[t]; the low nk coefficients start at 0.
-    let mut d = vec![0u8; n1];
+    //   d[nk + t] = msg[t]; the low nk coefficients start at 0. `d` holds the
+    //   secret message during division, so it is `Zeroizing` (wiped on drop).
+    let mut d = Zeroizing::new(vec![0u8; n1]);
     d[nk..(nk + k)].copy_from_slice(&msg[..k]);
 
     // Reduce d modulo g(x): cancel the leading coefficient at each degree from
@@ -110,104 +118,137 @@ pub fn rs_encode(msg: &[u8], codeword: &mut [u8], delta: usize) {
 
 /// Compute the 2δ syndromes S_j = received(α^j) for j = 1..=2δ.
 /// Returns the syndrome vector (s[t] = S_{t+1}) and whether any is non-zero.
+///
+/// Constant-time: every syndrome is computed (no early exit) and the
+/// "any non-zero" flag is accumulated branchlessly by OR-ing the bytes, so the
+/// instruction trace does not depend on the (secret) syndrome values. The
+/// returned bool is the single 1-bit summary; `rs_decode` no longer branches on
+/// it for a fast path.
 fn syndromes(received: &[u8], delta: usize) -> (Vec<u8>, bool) {
     let mut s = vec![0u8; 2 * delta];
-    let mut has_error = false;
+    let mut acc = 0u8;
     for j in 0..2 * delta {
-        // S_{j+1} = received(α^{j+1}); α^{j+1} = GF_EXP[j+1].
+        // S_{j+1} = received(α^{j+1}); α^{j+1} = GF_EXP[j+1] (public index).
         s[j] = gf_poly_eval(received, GF_EXP[j + 1]);
-        if s[j] != 0 {
-            has_error = true;
-        }
+        acc |= s[j];
     }
-    (s, has_error)
+    (s, acc != 0)
 }
 
 // ── Berlekamp-Massey ──────────────────────────────────────────────────────────
 
-/// Berlekamp-Massey over GF(2^8).
+/// Berlekamp-Massey over GF(2^8) — **constant-time** (Step 20b).
 ///
-/// Given syndromes `s` (s[t] = S_{t+1}, length 2δ), returns the error locator
-/// σ(x) = 1 + σ_1 x + … + σ_e x^e (little-endian, σ[0] = 1). deg σ = e = number
-/// of errors. The roots of σ are the inverse error locators α^{-i}.
-fn berlekamp_massey(s: &[u8]) -> Vec<u8> {
-    let n = s.len(); // = 2δ
-    let mut sigma = vec![0u8; n + 1];
+/// Given syndromes `s` (s[t] = S_{t+1}, length 2δ), returns `(σ, deg σ)` where
+/// σ(x) = 1 + σ_1 x + … (little-endian, σ[0] = 1, full length δ+1) and deg σ is
+/// the number of errors. The roots of σ are the inverse error locators α^{-i}.
+///
+/// This is a direct port of the HQC reference `compute_elp` (`reed_solomon.c`).
+/// Every conditional update is mask-merged rather than branched, so the
+/// instruction trace and memory-access pattern are identical for all syndrome
+/// inputs (the previous version branched on the discrepancy value and used a
+/// secret-bounded inner loop — leak classes C1/C3 from the audit):
+///
+/// - The only run-time predicate is `mask12` ("did the register length grow?").
+///   It is combined under `black_box` so LLVM cannot turn the masked merges back
+///   into a data-dependent branch (the C reference uses `volatile`).
+/// - Both loops run to **public** bounds (`min(μ+1, δ)` and `1..=δ`), never to a
+///   secret length.
+/// - `gf_inv`/`gf_mul`/`gf_div` are themselves branch-free (Step 20a), and
+///   `gf_inv(0) == 0` lets the `d_p` inverse run unconditionally.
+fn berlekamp_massey(s: &[u8]) -> (Vec<u8>, usize) {
+    let two_delta = s.len(); // = 2δ
+    let delta = two_delta / 2;
+
+    // σ(x): error locator, σ[0] = 1. Indices 0..=δ.
+    let mut sigma = vec![0u8; delta + 1];
     sigma[0] = 1;
-    let mut prev = vec![0u8; n + 1]; // B(x): σ from the last length change
-    prev[0] = 1;
+    // X·σ_p(x): the "B(x)" already shifted by X. Init = X (i.e. coefficient 1 at
+    // index 1). Index 0 stays 0 forever (no constant term). Secret-derived
+    // scratch buffers are `Zeroizing` so they wipe on drop (zeroize gap G3);
+    // `sigma` is wiped by the caller (`rs_decode` wraps the returned value).
+    let mut x_sigma_p = Zeroizing::new(vec![0u8; delta + 1]);
+    x_sigma_p[1] = 1;
+    // Scratch save of σ taken before each update (reference `sigma_copy`).
+    let mut sigma_copy = Zeroizing::new(vec![0u8; delta + 1]);
 
-    let mut l: usize = 0; // current register length (= deg σ)
-    let mut m: usize = 1; // shift since last length change
-    let mut b: u8 = 1; // discrepancy at the last length change
+    let mut deg_sigma: u16 = 0;
+    let mut deg_sigma_p: u16 = 0;
 
-    for i in 0..n {
-        // Discrepancy: δ = S_{i+1} + Σ_{j=1}^{L} σ_j · S_{i+1-j}.
-        let mut delta = s[i];
-        for j in 1..=l {
-            delta = gf_add(delta, gf_mul(sigma[j], s[i - j]));
+    // pp = ρ, the μ at the last length change; init −1 so deg_x = μ−pp = μ+1 at
+    // the start. The u16 wraparound is intentional (matches the reference).
+    let mut pp: u16 = u16::MAX;
+    let mut d_p: u8 = 1; // discrepancy at the last length change (b)
+    let mut d: u8 = s[0]; // current discrepancy
+
+    let mut mu: u16 = 0;
+    while (mu as usize) < two_delta {
+        // Save σ before this update (used to refresh X·σ_p on a length change).
+        sigma_copy.copy_from_slice(&sigma);
+        let deg_sigma_copy = deg_sigma;
+
+        // dd = d / d_p  (= δ/b). Branch-free; gf_inv(0) = 0.
+        let dd = gf_mul(d, gf_inv(d_p));
+
+        // σ(x) -= dd · (X·σ_p)(x). Public loop bound.
+        let upper = core::cmp::min(mu as usize + 1, delta);
+        for i in 1..=upper {
+            sigma[i] = gf_add(sigma[i], gf_mul(dd, x_sigma_p[i]));
         }
 
-        if delta == 0 {
-            m += 1;
-        } else if 2 * l <= i {
-            // Length change: T(x) = σ(x); σ(x) -= (δ/b) x^m B(x); B=T; L=i+1-L.
-            let coeff = gf_div(delta, b);
-            let t = sigma.clone();
-            for j in m..=i + 1 {
-                sigma[j] = gf_add(sigma[j], gf_mul(coeff, prev[j - m]));
-            }
-            prev = t;
-            l = i + 1 - l;
-            b = delta;
-            m = 1;
-        } else {
-            // No length change: σ(x) -= (δ/b) x^m B(x).
-            let coeff = gf_div(delta, b);
-            for j in m..=i + 1 {
-                sigma[j] = gf_add(sigma[j], gf_mul(coeff, prev[j - m]));
-            }
-            m += 1;
+        let deg_x = mu.wrapping_sub(pp); // shifts since last length change
+        let deg_x_sigma_p = deg_x.wrapping_add(deg_sigma_p);
+
+        // mask1 = 0xFFFF iff d != 0.
+        let m1bit = (d as u16).wrapping_neg() >> 15; // 1 if d != 0 else 0
+        let mask1 = 0u16.wrapping_sub(m1bit);
+        // mask2 = 0xFFFF iff deg_x_sigma_p > deg_sigma (sign bit of the diff;
+        // degrees are tiny so the signed interpretation is valid).
+        let m2bit = (deg_sigma.wrapping_sub(deg_x_sigma_p) >> 15) & 1;
+        let mask2 = 0u16.wrapping_sub(m2bit);
+        // mask12 = "register length grew". black_box stops the compiler from
+        // re-deriving a branch from the masked merges below.
+        let mask12 = core::hint::black_box(mask1 & mask2);
+        let mask12_u8 = mask12 as u8; // 0x00 or 0xFF
+
+        // deg_sigma = mask12 ? deg_x_sigma_p : deg_sigma.
+        deg_sigma ^= mask12 & (deg_x_sigma_p ^ deg_sigma);
+
+        // Final iteration only finalises deg_sigma (matches the reference break).
+        if (mu as usize) == two_delta - 1 {
+            break;
         }
+
+        // pp = mask12 ? mu : pp.
+        pp ^= mask12 & (mu ^ pp);
+        // d_p = mask12 ? d : d_p.
+        d_p ^= mask12_u8 & (d ^ d_p);
+        // X·σ_p = X · (mask12 ? σ_copy : X·σ_p): shift the chosen poly up by one.
+        for i in (1..=delta).rev() {
+            x_sigma_p[i] = (mask12_u8 & sigma_copy[i - 1]) | (!mask12_u8 & x_sigma_p[i - 1]);
+        }
+        // deg_sigma_p = mask12 ? deg_sigma_copy : deg_sigma_p.
+        deg_sigma_p ^= mask12 & (deg_sigma_copy ^ deg_sigma_p);
+
+        // Next discrepancy d = S_{μ+2} + Σ_{i=1}^{min(μ+1,δ)} σ_i · S_{μ+2−i}.
+        d = s[mu as usize + 1];
+        for i in 1..=upper {
+            d = gf_add(d, gf_mul(sigma[i], s[mu as usize + 1 - i]));
+        }
+
+        mu += 1;
     }
 
-    sigma.truncate(l + 1);
-    sigma
+    (sigma, deg_sigma as usize)
 }
 
-// ── Chien search ─────────────────────────────────────────────────────────────
+// ── Error-evaluator polynomial and formal derivative ──────────────────────────
 
-/// Find positions i in [0, n1) where σ(α^{-i}) = 0 (i.e. errors).
-/// Returns (position, α^{-i}) pairs. Always scans all n1 candidates (CT req).
-fn chien_search(sigma: &[u8], n1: usize) -> Vec<(usize, u8)> {
-    let mut roots = Vec::with_capacity(sigma.len().saturating_sub(1));
-
-    for i in 0..n1 {
-        // α^{-i} = α^{255-i} for i>0, α^0 = 1 for i=0. n1 ≤ 90 ⇒ 255-i ≥ 165, safe.
-        let xi = if i == 0 { GF_EXP[0] } else { GF_EXP[255 - i] };
-        if gf_poly_eval(sigma, xi) == 0 {
-            roots.push((i, xi));
-        }
-    }
-
-    roots
-}
-
-// ── Forney algorithm ──────────────────────────────────────────────────────────
-
-/// Compute error values via the Forney formula.
-///
-/// With σ(x) = ∏_l (1 - X_l x) and S(x) = Σ_{t} s[t] x^t (s[t] = S_{t+1}):
-///   Ω(x)  = S(x)·σ(x) mod x^{2δ}        (error evaluator)
-///   σ'(x) = formal derivative of σ      (char 2: only odd-degree terms survive)
-///   Y_l   = Ω(X_l^{-1}) / σ'(X_l^{-1})
-///
-/// The Chien root `xi = α^{-i}` IS X_l^{-1}, so Ω and σ' are evaluated at `xi`
-/// directly (NOT at its inverse). In char 2 the leading minus sign vanishes.
-fn forney(sigma: &[u8], synd: &[u8], roots: &[(usize, u8)]) -> Vec<u8> {
+/// Ω(x) = (S · σ) mod x^{2δ}, the Forney error-evaluator polynomial, where
+/// S(x) = Σ_t synd[t] x^t (synd[t] = S_{t+1}). Loop bounds are public (the
+/// syndrome / σ lengths), so this is constant-time.
+fn error_evaluator(synd: &[u8], sigma: &[u8]) -> Vec<u8> {
     let two_delta = synd.len();
-
-    // Ω(x) = (S · σ) mod x^{2δ}.
     let mut omega = vec![0u8; two_delta];
     for i in 0..synd.len() {
         for j in 0..sigma.len() {
@@ -216,23 +257,17 @@ fn forney(sigma: &[u8], synd: &[u8], roots: &[(usize, u8)]) -> Vec<u8> {
             }
         }
     }
+    omega
+}
 
-    // σ'(x): in char 2, d/dx of σ[j] x^j is σ[j] x^{j-1} for odd j, else 0.
-    // So σ'[j-1] = σ[j] for odd j.
+/// σ'(x), the formal derivative of σ. In characteristic 2 only odd-degree terms
+/// survive: σ'[j-1] = σ[j] for odd j. Constant-time (public loop).
+fn formal_derivative(sigma: &[u8]) -> Vec<u8> {
     let mut sigma_prime = vec![0u8; sigma.len()];
     for j in (1..sigma.len()).step_by(2) {
         sigma_prime[j - 1] = sigma[j];
     }
-
-    roots
-        .iter()
-        .map(|&(_pos, xi)| {
-            // xi = X_l^{-1}; evaluate Ω and σ' at xi.
-            let omega_val = gf_poly_eval(&omega, xi);
-            let sigma_val = gf_poly_eval(&sigma_prime, xi);
-            gf_div(omega_val, sigma_val)
-        })
-        .collect()
+    sigma_prime
 }
 
 // ── Public decode entry point ─────────────────────────────────────────────────
@@ -242,49 +277,86 @@ fn forney(sigma: &[u8], synd: &[u8], roots: &[(usize, u8)]) -> Vec<u8> {
 ///
 /// Returns `Some(message)` (k symbols, from the high positions) on success,
 /// or `None` if the error pattern is uncorrectable.
+///
+/// **Constant-time (Step 20c).** The whole pipeline runs the *same* fixed
+/// sequence of operations for every input — there is no syndrome fast path, no
+/// early exit, and no secret-dependent branch or memory address:
+///
+/// - Root finding replaces the old Chien search's conditional `roots.push`
+///   (leak class C1) and its secret-length `Vec` (zeroize gap G3). Instead we
+///   scan **every** position `i ∈ [0, n1)` and, branchlessly, (a) test whether
+///   α^{-i} is a root of σ with `ct_eq`, (b) compute the Forney value, and
+///   (c) XOR a masked correction into `corrected[i]`. The store address `i` is
+///   the public loop counter, never an error position.
+/// - The only run-time predicate is the final 1-bit validity used to choose
+///   `Some`/`None`. That bit is exactly what `kem::decaps` already consumes as a
+///   `Choice` (`decode_ok`), folded with the constant-time re-encryption check;
+///   it reveals nothing beyond "did decoding succeed", and all *work* preceding
+///   it is input-independent.
 pub fn rs_decode(received: &[u8], k: usize, delta: usize) -> Option<Vec<u8>> {
     let n1 = received.len();
     let nk = 2 * delta;
     debug_assert_eq!(k + nk, n1);
 
-    // Step 1: syndromes.
-    let (s, has_error) = syndromes(received, delta);
-    if !has_error {
-        return Some(received[nk..].to_vec());
+    // Step 1: syndromes (always computed in full — no fast path). Every
+    // secret-derived decode intermediate below is wrapped in `Zeroizing` so its
+    // heap buffer is wiped on drop / on every exit path (zeroize gap G3); all are
+    // fixed-size (no realloc), so no stale plaintext is left behind (defeater D2).
+    let s = Zeroizing::new(syndromes(received, delta).0);
+
+    // Step 2: Berlekamp-Massey (constant-time, Step 20b). σ is full length δ+1
+    // with trailing zero coefficients; deg σ is returned explicitly.
+    let (sigma, deg) = berlekamp_massey(&s);
+    let sigma = Zeroizing::new(sigma);
+
+    // Step 3: Ω(x) and σ'(x) for the Forney step (fixed-size, CT).
+    let omega = Zeroizing::new(error_evaluator(&s, &sigma));
+    let sigma_prime = Zeroizing::new(formal_derivative(&sigma));
+
+    // Step 4: constant-time root finding + correction. Scan every position; mark
+    // and correct roots branchlessly into a fixed-size buffer indexed by the
+    // public counter `i`.
+    let mut corrected = Zeroizing::new(received.to_vec());
+    let mut num_roots: usize = 0;
+    for i in 0..n1 {
+        // α^{-i} = α^{255-i} for i>0, α^0 = 1. n1 ≤ 90 ⇒ 255-i ≥ 165; public index.
+        let xi = if i == 0 { GF_EXP[0] } else { GF_EXP[255 - i] };
+
+        // is_root ⇔ σ(α^{-i}) == 0.
+        let is_root = gf_poly_eval(&sigma, xi).ct_eq(&0u8);
+
+        // Forney value Y = Ω(xi) / σ'(xi). gf_div is branch-free; at a non-root
+        // (or when σ'(xi) = 0) the value is masked away below.
+        let y = gf_div(gf_poly_eval(&omega, xi), gf_poly_eval(&sigma_prime, xi));
+
+        // Apply the correction only at roots, branchlessly.
+        let correction = u8::conditional_select(&0u8, &y, is_root);
+        corrected[i] ^= correction;
+
+        // Count roots without branching (for the validity check below).
+        num_roots += is_root.unwrap_u8() as usize;
     }
 
-    // Step 2: Berlekamp-Massey.
-    let sigma = berlekamp_massey(&s);
-    let num_errors = sigma.len() - 1;
-
-    if num_errors == 0 || num_errors > delta {
-        return None;
+    // Step 5: validity. Re-verify the corrected word has all-zero syndromes
+    // (computed branchlessly) and that the locator was sane. This reproduces the
+    // old None/Some decision exactly; it is the single final branch.
+    let s2 = Zeroizing::new(syndromes(&corrected, delta).0);
+    let mut acc = 0u8;
+    for &sj in s2.iter() {
+        acc |= sj;
     }
+    // Fold the three conditions branchlessly into one bit; only the final
+    // Some/None choice branches.
+    let synd_zero = (acc == 0) as u8;
+    let deg_ok = (deg <= delta) as u8;
+    let roots_ok = (num_roots == deg) as u8;
+    let valid = (synd_zero & deg_ok & roots_ok) == 1;
 
-    // Step 3: Chien search (full scan, no early exit).
-    let roots = chien_search(&sigma, n1);
-
-    // Root count must match deg σ, else the locator is invalid (too many errors).
-    if roots.len() != num_errors {
-        return None;
+    if valid {
+        Some(corrected[nk..].to_vec())
+    } else {
+        None
     }
-
-    // Step 4: Forney — error values.
-    let error_vals = forney(&sigma, &s, &roots);
-
-    // Step 5: correct the received word.
-    let mut corrected = received.to_vec();
-    for (&(pos, _xi), &e) in roots.iter().zip(error_vals.iter()) {
-        corrected[pos] = gf_add(corrected[pos], e);
-    }
-
-    // Re-verify: a valid correction zeroes all syndromes.
-    let (_s2, still_err) = syndromes(&corrected, delta);
-    if still_err {
-        return None;
-    }
-
-    Some(corrected[nk..].to_vec())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -471,10 +543,63 @@ mod tests {
         }
     }
 
-    // ── Chien search locates the right positions ──────────────────────────────
+    // ── Randomized correctness: every ≤ δ pattern decodes ─────────────────────
+    // Exercises the constant-time root finder + inline Forney across many random
+    // error counts / positions / values, beyond the hand-picked patterns above.
 
     #[test]
-    fn chien_search_finds_correct_positions() {
+    fn ct_decode_corrects_random_patterns() {
+        // Deterministic LCG (no external rng dependency).
+        let mut state: u64 = 0x1234_5678_9ABC_DEF0;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+
+        for &(n1, k, delta) in &[S1, S2, S3] {
+            for _ in 0..40 {
+                let msg: Vec<u8> = (0..k).map(|_| next() as u8).collect();
+                let cw = encode(&msg, n1, delta);
+                let mut received = cw.clone();
+
+                // Choose a random error count in [0, δ] and distinct positions.
+                let num = (next() as usize) % (delta + 1);
+                let mut positions: Vec<usize> = Vec::new();
+                while positions.len() < num {
+                    let p = (next() as usize) % n1;
+                    if !positions.contains(&p) {
+                        positions.push(p);
+                    }
+                }
+                for &p in &positions {
+                    let v = (next() as u8) | 1; // non-zero error value
+                    received[p] ^= v;
+                }
+
+                let recovered = rs_decode(&received, k, delta)
+                    .unwrap_or_else(|| panic!("delta={delta} num={num}: decode returned None"));
+                assert_eq!(recovered, msg, "delta={delta} num={num} positions={positions:?}");
+            }
+        }
+    }
+
+    // ── Root finding locates the right positions ──────────────────────────────
+    // Test-only naive Chien search (the production decoder now finds roots via a
+    // branchless full scan inside `rs_decode`). Confirms σ vanishes exactly at
+    // the injected error positions.
+    fn chien_positions(sigma: &[u8], n1: usize) -> Vec<usize> {
+        let mut positions = Vec::new();
+        for i in 0..n1 {
+            let xi = if i == 0 { GF_EXP[0] } else { GF_EXP[255 - i] };
+            if gf_poly_eval(sigma, xi) == 0 {
+                positions.push(i);
+            }
+        }
+        positions
+    }
+
+    #[test]
+    fn root_finding_locates_correct_positions() {
         let (n1, k, delta) = S1;
         let msg: Vec<u8> = (0..k as u8).collect();
         let cw = encode(&msg, n1, delta);
@@ -482,9 +607,8 @@ mod tests {
         inject_errors(&mut received, &[(3, 0x11), (10, 0x22)]);
 
         let (s, _) = syndromes(&received, delta);
-        let sigma = berlekamp_massey(&s);
-        let roots = chien_search(&sigma, n1);
-        let positions: Vec<usize> = roots.iter().map(|&(p, _)| p).collect();
+        let (sigma, _deg) = berlekamp_massey(&s);
+        let positions = chien_positions(&sigma, n1);
         assert!(
             positions.contains(&3),
             "should find position 3: {positions:?}"
@@ -494,6 +618,88 @@ mod tests {
             "should find position 10: {positions:?}"
         );
         assert_eq!(positions.len(), 2);
+    }
+
+    // ── Oracle: the old branch-based BM (pre-Step-20b) ────────────────────────
+    // Retained only here to prove the new constant-time `berlekamp_massey`
+    // produces the identical error locator on every correctable pattern.
+    // (Same cross-check pattern Step 17/20a used.)
+    fn berlekamp_massey_ref(s: &[u8]) -> Vec<u8> {
+        let n = s.len();
+        let mut sigma = vec![0u8; n + 1];
+        sigma[0] = 1;
+        let mut prev = vec![0u8; n + 1];
+        prev[0] = 1;
+        let mut l: usize = 0;
+        let mut m: usize = 1;
+        let mut b: u8 = 1;
+        for i in 0..n {
+            let mut delta = s[i];
+            for j in 1..=l {
+                delta = gf_add(delta, gf_mul(sigma[j], s[i - j]));
+            }
+            if delta == 0 {
+                m += 1;
+            } else if 2 * l <= i {
+                let coeff = gf_div(delta, b);
+                let t = sigma.clone();
+                for j in m..=i + 1 {
+                    sigma[j] = gf_add(sigma[j], gf_mul(coeff, prev[j - m]));
+                }
+                prev = t;
+                l = i + 1 - l;
+                b = delta;
+                m = 1;
+            } else {
+                let coeff = gf_div(delta, b);
+                for j in m..=i + 1 {
+                    sigma[j] = gf_add(sigma[j], gf_mul(coeff, prev[j - m]));
+                }
+                m += 1;
+            }
+        }
+        sigma.truncate(l + 1);
+        sigma
+    }
+
+    #[test]
+    fn ct_berlekamp_massey_matches_reference() {
+        // For every code and every correctable error count e ∈ [1, δ], the
+        // CT BM must return deg σ = e and the same σ coefficients (the locator
+        // is unique for ≤ δ errors), with zero padding above degree e.
+        for &(n1, k, delta) in &[S1, S2, S3] {
+            for num_errors in 1..=delta {
+                let msg: Vec<u8> = (0..k as u8).map(|i| i.wrapping_mul(13).wrapping_add(7)).collect();
+                let cw = encode(&msg, n1, delta);
+                let mut received = cw.clone();
+                // Distinct positions, non-zero error values.
+                let errors: Vec<(usize, u8)> = (0..num_errors)
+                    .map(|i| (i * 2 % n1, (i as u8).wrapping_mul(31).wrapping_add(1) | 1))
+                    .collect();
+                inject_errors(&mut received, &errors);
+
+                let (s, _) = syndromes(&received, delta);
+                let (sigma_ct, deg_ct) = berlekamp_massey(&s);
+                let sigma_ref = berlekamp_massey_ref(&s);
+
+                assert_eq!(
+                    deg_ct,
+                    sigma_ref.len() - 1,
+                    "delta={delta} e={num_errors}: degree mismatch"
+                );
+                // Coefficients agree up to the degree.
+                assert_eq!(
+                    &sigma_ct[..=deg_ct],
+                    sigma_ref.as_slice(),
+                    "delta={delta} e={num_errors}: locator mismatch"
+                );
+                // Padding above the degree is zero.
+                assert!(
+                    sigma_ct[deg_ct + 1..].iter().all(|&c| c == 0),
+                    "delta={delta} e={num_errors}: nonzero padding"
+                );
+            }
+        }
     }
 
     // ── BM degree equals the number of injected errors ────────────────────────
@@ -510,12 +716,8 @@ mod tests {
                 .collect();
             inject_errors(&mut received, &errors);
             let (s, _) = syndromes(&received, delta);
-            let sigma = berlekamp_massey(&s);
-            assert_eq!(
-                sigma.len() - 1,
-                num_errors,
-                "deg σ should equal error count {num_errors}"
-            );
+            let (_sigma, deg) = berlekamp_massey(&s);
+            assert_eq!(deg, num_errors, "deg σ should equal error count {num_errors}");
         }
     }
 }

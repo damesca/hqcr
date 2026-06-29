@@ -1,8 +1,17 @@
 // GF(2^8) arithmetic for Reed-Solomon.
 // Primitive polynomial: p(x) = x^8 + x^4 + x^3 + x^2 + 1 (0x11D).
-// Precomputed tables: GF_LOG[256] (discrete log base α) and GF_EXP[512]
-// (antilog, doubled to avoid modular reduction in multiply).
-// Exports: gf_add, gf_mul, gf_inv. Zero is handled as a special case.
+//
+// Constant-time discipline (Step 20a): the multiply/inverse/divide path is
+// **branch-free and table-free** — no data-dependent loads, no value-dependent
+// branches. This is required because the RS decoder feeds these functions the
+// secret-derived decoded codeword (see docs/SECURITY-AUDIT.md). `gf_mul` is a
+// carry-less multiply + fixed reduction; `gf_inv` is a fixed addition chain
+// (a^254 = a^{-1}); both treat 0 branchlessly (0 maps to 0).
+//
+// The precomputed log/antilog tables remain but are used **only on public
+// index paths** (generator-poly precompute, syndrome/Chien evaluation indexed
+// by public loop counters, and the additive FFT's public basis in Step 20c).
+// They are never indexed by a secret in arithmetic any more.
 
 // ── Table generation ──────────────────────────────────────────────────────────
 //
@@ -52,6 +61,11 @@ pub(crate) const GF_EXP: &[u8; 512] = &TABLES.0;
 
 /// Discrete log base α. GF_LOG[α^i] == i for i in 0..255.
 /// GF_LOG[0] is a sentinel (value 0); never pass 0 to functions that use it.
+///
+/// No longer used by the (now branch-free) arithmetic below — retained for
+/// public-index paths only (the additive FFT of Step 20c indexes it by the
+/// public FFT basis). `allow(dead_code)` until that lands.
+#[allow(dead_code)]
 pub(crate) const GF_LOG: &[u8; 256] = &TABLES.1;
 
 // ── Arithmetic ────────────────────────────────────────────────────────────────
@@ -62,32 +76,87 @@ pub fn gf_add(a: u8, b: u8) -> u8 {
     a ^ b
 }
 
-/// Multiplication in GF(2^8) via log/antilog tables.
-/// gf_mul(a, b) = α^(log a + log b)  [with special case for zero].
+/// Reduce a carry-less product (deg ≤ 14, i.e. a 15-bit polynomial) modulo
+/// p(x) = 0x11D, producing an element of GF(2^8) (deg < 8).
+///
+/// Branch-free: clears bits 14..8 from the top down. Because p(x) has its
+/// leading term at bit 8, `0x11D << (k - 8)` has its top bit exactly at bit `k`,
+/// so XOR-ing it clears bit `k` without disturbing any higher bit. The shift
+/// amount and loop bound are constants; the only data dependence is the masked
+/// XOR, which executes regardless of the bit's value.
+#[inline(always)]
+fn gf_reduce(mut x: u16) -> u8 {
+    let mut p: u32 = 14;
+    while p >= 8 {
+        let bit = (x >> p) & 1;
+        let mask = 0u16.wrapping_sub(bit); // 0xFFFF if bit set, else 0x0000
+        x ^= mask & (0x011Du16 << (p - 8));
+        p -= 1;
+    }
+    x as u8
+}
+
+/// Squaring in GF(2^8). Squaring is F2-linear: interleave zero bits between the
+/// input bits, then reduce. Branch-free (no value-dependent control flow).
+#[inline(always)]
+fn gf_sq(a: u8) -> u8 {
+    let a = a as u16;
+    let mut spread: u16 = 0;
+    let mut i = 0u32;
+    while i < 8 {
+        let bit = (a >> i) & 1;
+        spread |= bit << (2 * i);
+        i += 1;
+    }
+    gf_reduce(spread)
+}
+
+/// Multiplication in GF(2^8): branch-free carry-less multiply + reduction.
+/// gf_mul(a, b) = (a · b mod p(x)). Zero is handled branchlessly (any masked
+/// term with a clear `b` bit contributes nothing; a == 0 ⇒ product 0).
 #[inline]
 pub fn gf_mul(a: u8, b: u8) -> u8 {
-    if a == 0 || b == 0 {
-        return 0;
+    let a = a as u16;
+    let b = b as u16;
+    // Carry-less product: prod = XOR over set bits i of b of (a << i).
+    // deg(prod) ≤ 7 + 7 = 14, so it fits in u16.
+    let mut prod: u16 = 0;
+    let mut i = 0u32;
+    while i < 8 {
+        let bit = (b >> i) & 1;
+        let mask = 0u16.wrapping_sub(bit); // 0xFFFF if bit i of b set
+        prod ^= mask & (a << i);
+        i += 1;
     }
-    GF_EXP[GF_LOG[a as usize] as usize + GF_LOG[b as usize] as usize]
+    gf_reduce(prod)
 }
 
-/// Multiplicative inverse in GF(2^8).
-/// a^{-1} = α^{255 - log a}  (since α^255 = 1).
-/// Panics on zero in debug builds; undefined behaviour in release.
+/// Multiplicative inverse in GF(2^8) via a fixed addition chain.
+/// a^{-1} = a^254 (since a^255 = 1 for a ≠ 0). The chain
+/// 2,3,4,7,11,15,30,60,120,127,254 uses only `gf_sq`/`gf_mul`, so it is
+/// branch-free and runs the same instructions for every input.
+///
+/// `gf_inv(0) == 0` (0 has no inverse; this is a branchless sentinel, matching
+/// the HQC reference — every square/multiply of 0 stays 0).
 #[inline]
 pub fn gf_inv(a: u8) -> u8 {
-    debug_assert!(a != 0, "gf_inv(0) is undefined");
-    GF_EXP[255 - GF_LOG[a as usize] as usize]
+    let a2 = gf_sq(a); // a^2
+    let a3 = gf_mul(a2, a); // a^3
+    let a4 = gf_sq(a2); // a^4
+    let a7 = gf_mul(a4, a3); // a^7
+    let a11 = gf_mul(a4, a7); // a^11  = a^4 · a^7
+    let a15 = gf_mul(a11, a4); // a^15  = a^11 · a^4
+    let a30 = gf_sq(a15); // a^30
+    let a60 = gf_sq(a30); // a^60
+    let a120 = gf_sq(a60); // a^120
+    let a127 = gf_mul(a120, a7); // a^127 = a^120 · a^7
+    gf_sq(a127) // a^254 = (a^127)^2
 }
 
-/// Division: a / b = a * b^{-1}.
-/// Returns 0 if a == 0. Panics on b == 0 in debug builds.
+/// Division: a / b = a · b^{-1}. Branch-free.
+/// `gf_div(a, 0) == 0` (follows from `gf_inv(0) == 0`); `gf_div(0, b) == 0`.
 #[inline]
 pub fn gf_div(a: u8, b: u8) -> u8 {
-    if a == 0 {
-        return 0;
-    }
     gf_mul(a, gf_inv(b))
 }
 
@@ -106,6 +175,58 @@ pub fn gf_poly_eval(p: &[u8], x: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Oracles: the old table-based arithmetic (pre-Step-20a) ─────────────────
+    // Retained only here to prove the new branch-free `gf_mul`/`gf_inv` produce
+    // byte-identical results across the entire input space. (Same cross-check
+    // pattern Step 17 used for `mul_dense_ct_bitwise`.)
+
+    /// Old table-based multiply: gf_mul(a,b) = α^(log a + log b), zero special-cased.
+    fn gf_mul_table(a: u8, b: u8) -> u8 {
+        if a == 0 || b == 0 {
+            return 0;
+        }
+        GF_EXP[GF_LOG[a as usize] as usize + GF_LOG[b as usize] as usize]
+    }
+
+    /// Old table-based inverse: a^{-1} = α^{255 - log a} (undefined at 0).
+    fn gf_inv_table(a: u8) -> u8 {
+        GF_EXP[255 - GF_LOG[a as usize] as usize]
+    }
+
+    #[test]
+    fn gf_mul_matches_table_oracle_exhaustive() {
+        // All 256×256 = 65 536 pairs, including zeros.
+        for a in 0u8..=255 {
+            for b in 0u8..=255 {
+                assert_eq!(gf_mul(a, b), gf_mul_table(a, b), "a={a:#04x} b={b:#04x}");
+            }
+        }
+    }
+
+    #[test]
+    fn gf_inv_matches_table_oracle_exhaustive() {
+        // Branch-free inverse must match the table for every non-zero element.
+        for a in 1u8..=255 {
+            assert_eq!(gf_inv(a), gf_inv_table(a), "a={a:#04x}");
+        }
+    }
+
+    #[test]
+    fn gf_inv_zero_is_zero() {
+        // Branchless sentinel: 0 has no inverse, the addition chain maps it to 0.
+        assert_eq!(gf_inv(0), 0);
+        assert_eq!(gf_div(5, 0), 0);
+        assert_eq!(gf_div(0, 7), 0);
+    }
+
+    #[test]
+    fn gf_sq_matches_self_multiply() {
+        // gf_sq(a) must equal gf_mul(a, a) for every element.
+        for a in 0u8..=255 {
+            assert_eq!(gf_sq(a), gf_mul(a, a), "a={a:#04x}");
+        }
+    }
 
     #[test]
     fn exp_log_are_inverses() {

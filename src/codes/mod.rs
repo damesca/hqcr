@@ -23,6 +23,7 @@ pub mod reed_solomon;
 
 use crate::params::HqcParams;
 use crate::poly::Poly;
+use zeroize::Zeroizing;
 
 /// Bytes occupied by the full concatenated codeword: n1 blocks of N2 bits each.
 /// N2 is a multiple of 8, so this division is exact.
@@ -46,12 +47,14 @@ fn block_bytes<P: HqcParams>() -> usize {
 pub fn encode<P: HqcParams>(msg: &[u8]) -> Poly<P> {
     debug_assert_eq!(msg.len(), P::K, "message must be exactly K bytes");
 
-    // Step 1: RS encode → n1 GF(2^8) symbols.
-    let mut rs_cw = vec![0u8; P::N1];
+    // Step 1: RS encode → n1 GF(2^8) symbols. `rs_cw`/`buf` are message-derived
+    // (secret in Encaps and in the Decaps re-encryption), so they are `Zeroizing`
+    // and wiped on drop (zeroize gap G3 / the documented codec-buffer gap).
+    let mut rs_cw = Zeroizing::new(vec![0u8; P::N1]);
     reed_solomon::rs_encode(msg, &mut rs_cw, P::DELTA);
 
     // Step 2 + 3: RM encode each symbol into its N2-bit block, concatenated.
-    let mut buf = vec![0u8; codeword_bytes::<P>()];
+    let mut buf = Zeroizing::new(vec![0u8; codeword_bytes::<P>()]);
     for (j, &symbol) in rs_cw.iter().enumerate() {
         reed_muller::rm_encode(symbol, P::MULTIPLICITY, &mut buf, j * P::N2);
     }
@@ -65,12 +68,15 @@ pub fn encode<P: HqcParams>(msg: &[u8]) -> Poly<P> {
 /// Concatenated RMRS decode: `poly` (the noisy codeword `C.Encode(m) + err`)
 /// → `Some(msg)` (K bytes) on success, or `None` if RS decoding fails.
 pub fn decode<P: HqcParams>(poly: &Poly<P>) -> Option<Vec<u8>> {
-    // Extract the low n1*N2 bits back into a flat byte buffer.
-    let buf = poly_to_bytes::<P>(codeword_bytes::<P>(), poly);
+    // Extract the low n1*N2 bits back into a flat byte buffer. `buf`/`rs_cw` are
+    // secret-derived (the noisy decoded codeword and its RM-decoded symbols), so
+    // they are `Zeroizing` and wiped on drop (zeroize gap G3 + `poly_to_bytes`
+    // output). The returned message is wrapped by the caller (`kem::decaps`).
+    let buf = Zeroizing::new(poly_to_bytes::<P>(codeword_bytes::<P>(), poly));
     let bb = block_bytes::<P>();
 
     // Step 1 + 2: RM decode each N2-bit block → one GF(2^8) symbol.
-    let mut rs_cw = vec![0u8; P::N1];
+    let mut rs_cw = Zeroizing::new(vec![0u8; P::N1]);
     for j in 0..P::N1 {
         let block = &buf[j * bb..(j + 1) * bb];
         rs_cw[j] = reed_muller::rm_decode(block, P::MULTIPLICITY);
