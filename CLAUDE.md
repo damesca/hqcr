@@ -8,470 +8,148 @@ Context file for Claude Code. Read this before touching any code in this repo.
 
 - Never run `cargo` commands (e.g. `cargo test`, `cargo check`, `cargo build`). Only provide the command for the user to run in their terminal.
 - Never run any code without asking. Usually it is better to provide/write some script and tell me to run it myself, giving me the command to do so.
----
 
 ---
 
 ## Project overview
 
 Pure-Rust implementation of **HQC (Hamming Quasi-Cyclic)**, the NIST-selected
-post-quantum KEM (selected March 2025, FIPS draft expected ~2027). HQC is a
-code-based IND-CCA2 KEM whose security reduces to the Quasi-Cyclic Syndrome
-Decoding (QCSD) problem — a variant of the NP-complete Syndrome Decoding
-problem.
+post-quantum KEM (selected March 2025, FIPS draft expected ~2027). Security reduces
+to the Quasi-Cyclic Syndrome Decoding (QCSD) problem.
 
-This is a **pure-Rust, no-unsafe-by-default** implementation targeting
-production quality: correct, constant-time, and verified against the official
-KAT (Known Answer Test) vectors.
-
-**Repo:** https://github.com/nshkrdotcom/pqc-hqc  
+**Repo:** https://github.com/damesca/hqcr  
 **License:** MIT OR Apache-2.0  
-**Spec version:** [HQC specifications 22/08/2025](https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf)  
-**Foundational paper:** Aguilar-Melchor et al., *Efficient Encryption from Random Quasi-Cyclic Codes*, IEEE Trans. Inf. Theory 64(5), 2018. arXiv:1612.05572
+**Spec version:** [HQC specifications 22/08/2025](https://pqc-hqc.org/doc/hqc_specifications_2025_08_22.pdf)
 
 ---
 
 ## Directory layout
 
-Single-crate design. No workspace split — the internal complexity doesn't
-justify the cross-crate compilation overhead for a standalone crypto library.
-
 ```
 hqc/
-├── Cargo.toml
-├── CLAUDE.md
 ├── src/
 │   ├── lib.rs              # Crate root: re-exports, HqcParams trait
-│   ├── params.rs           # Hqc128 / Hqc192 / Hqc256 (all three always compiled)
-│   │
+│   ├── params.rs           # Hqc128 / Hqc192 / Hqc256
+│   ├── gf.rs               # GF(2^8) arithmetic (branch-free, table-free)
 │   ├── poly/
-│   │   ├── mod.rs          # Poly type: bit-packed [u64; N_WORDS], add (XOR), reduce
-│   │   ├── mul.rs          # Polynomial multiplication — the hot path
-│   │   └── sampling.rs     # SampleFixedWeightVect$ + hamming_weight
-│   │
-│   ├── gf.rs               # GF(2^8) arithmetic for Reed-Solomon (log/exp tables)
-│   │
+│   │   ├── mod.rs          # Poly<P>: bit-packed [u64; N_WORDS]
+│   │   ├── mul.rs          # Polynomial multiplication (hot path)
+│   │   └── sampling.rs     # sample_fixed_weight / _mod / hamming_weight
 │   ├── codes/
-│   │   ├── mod.rs          # Top-level C.Encode / C.Decode (RS ∘ RM)
+│   │   ├── mod.rs          # C.Encode / C.Decode (RS ∘ RM)
 │   │   ├── reed_muller.rs  # RM(1,7): encode + duplicated FHT decode
-│   │   └── reed_solomon.rs # Shortened RS over GF(2^8): encode + BM decode
-│   │
+│   │   └── reed_solomon.rs # Shortened RS: encode + CT BM + CT full-scan decode
 │   ├── parsing.rs          # Serialize / deserialize keys and ciphertexts
-│   ├── hash.rs             # G (SHAKE256), H (SHA3-256 of ek), J (SHAKE256), SHA3-512
+│   ├── hash.rs             # G (SHAKE256), H (SHA3-256), J (SHAKE256), SHA3-512
 │   ├── pke.rs              # HQC-PKE: Keygen, Encrypt, Decrypt (IND-CPA)
 │   └── kem.rs              # HQC-KEM: Keygen, Encaps, Decaps (IND-CCA2, SFO⊥_m)
-│
 ├── tests/
 │   └── kat.rs              # KAT vectors — ground truth for correctness
-│
-└── benches/
-    └── bench.rs            # criterion: poly_mul, keygen, encaps, decaps
+├── benches/
+│   └── bench.rs            # criterion: poly_mul, kem, decode_stages
+└── docs/
+    └── SECURITY-AUDIT.md   # CT + zeroize audit log
 ```
 
 ---
 
 ## Parameters (spec 2025 — authoritative)
 
-> ⚠️ The naming convention follows the spec: **`n1` = external RS code length**,
-> **`n2` = internal RM code length**. Some earlier documents and other
-> implementations swap these labels — always check against Table 5 of the spec.
+> ⚠️ **`n1` = external RS code length**, **`n2` = internal RM code length**.
+> Some earlier documents swap these — always check Table 5 of the spec.
 
 | Constant | HQC-128 | HQC-192 | HQC-256 |
 |:---|:---:|:---:|:---:|
-| NIST security level | 1 | 3 | 5 |
-| `n` (ring dimension, primitive prime) | 17 669 | 35 851 | 57 637 |
-| `n1` (shortened RS code length) | 46 | 56 | 90 |
-| `n2` (duplicated RM code length) | 384 | 640 | 640 |
-| `k` (message length in bytes) | 16 | 24 | 32 |
-| `ω` (secret vector weight) | 66 | 100 | 131 |
-| `ωr = ωe` (ephemeral/error weight) | 75 | 114 | 149 |
+| `n` (ring dimension) | 17 669 | 35 851 | 57 637 |
+| `n1` (shortened RS length) | 46 | 56 | 90 |
+| `n2` (duplicated RM length) | 384 | 640 | 640 |
+| `k` (message bytes) | 16 | 24 | 32 |
+| `ω` (secret weight) | 66 | 100 | 131 |
+| `ωr = ωe` (ephemeral weight) | 75 | 114 | 149 |
 | `δ` (RS error-correcting capacity) | 15 | 16 | 29 |
 | RM multiplicity | 3 | 5 | 5 |
-| DFR target | < 2⁻¹²⁸ | < 2⁻¹⁹² | < 2⁻²⁵⁶ |
-| `\|ekKEM\|` (public key) | 2 241 B | 4 514 B | 7 237 B |
-| `\|dkKEM\|` compressed | 32 B | 32 B | 32 B |
-| `\|cKEM\|` (ciphertext) | 4 433 B | 8 978 B | 14 421 B |
-| `\|K\|` (shared key) | 32 B | 32 B | 32 B |
-
-**Derived sizes:**
-- `|seed| = 32 B`, `|salt| = 16 B`
-- `|ekKEM| = |seed| + ⌈n/8⌉`
-- `|cKEM| = ⌈n/8⌉ + ⌈(n1·n2)/8⌉ + |salt|`
+| `\|ekKEM\|` | 2 241 B | 4 514 B | 7 237 B |
+| `\|cKEM\|` | 4 433 B | 8 978 B | 14 421 B |
 
 ---
 
 ## Mathematical core
 
-### The ring R
+### Ring and PKE
 
-All arithmetic lives in `R = F2[X]/(X^n - 1)` where `n` is a **primitive prime**
-(ensures `X^n - 1` has exactly two irreducible factors over F2, blocking
-algebraic attacks). Elements are represented as bit-packed `[u64; N_WORDS]`.
+All arithmetic in `R = F2[X]/(X^n - 1)`, `n` primitive prime. Addition = XOR.
 
 ```
-w_k = sum_{i+j ≡ k (mod n)} u_i * v_j     // cyclic convolution
+Secret key:  (x, y) ∈ R_ω × R_ω
+Public key:  (h, s),  s = x + h·y
+
+Encrypt:  u = r1 + h·r2,  v = C.Encode(m) + s·r2 + e
+Decrypt:  v − u·y = C.Encode(m) + err;  m = C.Decode(·)
 ```
 
-Addition in R = bitwise XOR. No carry, no reduction needed.
+### RMRS codec
 
-### HQC-PKE structure
+- **Encode:** RS(m → n1 symbols) then RM(each symbol → n2/n1 bits), concatenate → n1·n2 bits.
+- **Decode:** RM decode each block (FHT) → n1 symbols; RS decode (BM + full scan) → m.
+- RM base code: RM(1,7) = [128, 8, 64], duplicated ×3 or ×5.
+- RS codes: `RS-S1: [46,16,31]`, `RS-S2: [56,24,33]`, `RS-S3: [90,32,49]`.
+- Generator polynomials G1/G2/G3 are hardcoded from spec §3.4.2.
 
-```
-Secret key:  (x, y) ∈ R_ω × R_ω          // sparse, weight exactly ω
-Public key:  (h, s) where s = x + h·y     // h uniform random in R
-
-Ciphertext:  (u, v) where
-    u = r1 + h·r2                         // r1, r2, e ∈ R_ωr
-    v = m' + s·r2 + e                     // m' = C.Encode(m)
-
-Decryption:
-    v - u·y = m' + (x·r2 + r1·y + e)
-            = m' + err
-    m = C.Decode(m' + err)  succeeds iff  weight(err) ≤ Δ
-```
-
-### RMRS codec — concatenated Reed-Muller / Reed-Solomon
-
-**Encoding** (outer-then-inner, i.e. RS then RM):
-1. RS.Encode: `m` (k bytes) → `n1` symbols over GF(2^8)
-2. RM.Encode: each GF(2^8) symbol → one RM codeword of `n2/n1` bits (128 bits
-   base, duplicated 3× or 5×)
-3. Concatenate: total length = `n1 · (n2/n1)` = `n2` bits → embedded in R of
-   length `n` (last `ℓ = n - n1·(n2/n1)` bits truncated)
-
-> **Clarification on the codec parameters:** the RM base code is always
-> **RM(1,7) = [128, 8, 64]** (m=7, blocks of 128 bits, encodes 8 bits per
-> block). It is duplicated to [384, 8, 192] (×3) or [640, 8, 320] (×5).
-> The RS code operates over **GF(2^8)** (m=8 for field arithmetic), using the
-> primitive polynomial `1 + α² + α³ + α⁴ + α⁸`. These are two different uses
-> of the letter `m` — do not conflate them.
-
-**Decoding** (inner-then-outer, i.e. RM then RS):
-1. Split into `n1` blocks of `(n2/n1)` bits each
-2. RM.Decode each block via duplicated FHT → `n1` GF(2^8) symbols
-3. RS.Decode via Berlekamp-Massey + Chien search → `m` (original message)
-
-**Shortened RS codes** (Table 3 of spec):
-```
-RS-S1: [46,  16, 31]  (shortened from [255, 225, 31])
-RS-S2: [56,  24, 33]  (shortened from [255, 223, 33])
-RS-S3: [90,  32, 49]  (shortened from [255, 197, 49])
-```
-Precomputed generator polynomials `g1`, `g2`, `g3` are given in the spec
-(§3.4.2) — hardcode them, do not recompute.
-
-### HQC-KEM (IND-CCA2 via SFO⊥_m)
-
-The transform used since the 2025 spec is the **salted FO with implicit
-rejection**, denoted SFO⊥_m. Hash functions per the spec:
+### KEM (SFO⊥_m)
 
 ```
-G : {0,1}* → {0,1}^|θ|×{0,1}^|K|     // SHAKE256, derives (θ, K) from (m, ek, salt)
-H : {0,1}* → {0,1}^256                // SHA3-256, hashes ekKEM → used inside G
-J : {0,1}* → {0,1}^|K|                // SHAKE256, rejection key from (σ, c)
-```
+G: SHAKE256 → (θ, K)    H: SHA3-256(ek)    J: SHAKE256 → K_bar
 
-Decaps always outputs a key — never an error:
-```
-if m' ≠ ⊥  AND  c'KEM == cKEM:   return K'        // valid path
-else:                              return J(σ, c)   // implicit rejection
+Decaps: valid = ct_eq(c'_PKE, c_PKE) & m'_not_none
+        return ct_select(valid, K', J(σ, c))
 ```
 
 ---
 
-## Module responsibilities
-
-### `params.rs`
-
-Defines the `HqcParams` trait and three zero-size implementors:
-
-```rust
-pub trait HqcParams: sealed::Sealed {
-    const N:           usize;  // ring dimension
-    const N1:          usize;  // RS code length (external)
-    const N2:          usize;  // RM code length after duplication (internal)
-    const K:           usize;  // message length in bytes
-    const OMEGA:       usize;  // secret weight
-    const OMEGA_R:     usize;  // ephemeral weight ωr = ωe
-    const DELTA:       usize;  // RS error-correcting capacity
-    const MULTIPLICITY: usize; // RM duplication factor (3 or 5)
-    // Derived:
-    const N_WORDS:     usize;  // ceil(N / 64)
-    const PK_BYTES:    usize;
-    const CT_BYTES:    usize;
-    const SK_BYTES:    usize;  // compressed = 32 B
-}
-
-pub struct Hqc128;
-pub struct Hqc192;
-pub struct Hqc256;
-```
-
-### `poly/mod.rs`
-
-`Poly<P: HqcParams>`: bit-packed polynomial in R, stored as `[u64; P::N_WORDS]`
-(stack-allocated, no heap). Operations:
-- `add(&self, rhs) -> Self` — XOR (in-place variant too)
-- `reduce(&mut self)` — fold the overflow bits back (only needed after sparse×dense mul)
-- `get_bit(i)`, `set_bit(i)`, `clear()`
-
-Do not use `Vec<u64>` — these arrays fit on the stack for all three parameter
-sets and avoiding heap allocation matters for performance and zeroize.
-
-### `poly/mul.rs`
-
-**The hot path.** Two multiplication modes, both must be correct:
-
-**Mode A — Sparse × Dense** (used for keygen and encrypt with secret/ephemeral
-vectors): one operand has weight `ω` or `ωr`. Iterate over the set bit
-positions and XOR-rotate the dense operand. Cost: `O(ω · N/64)`.
-
-```
-for pos in sparse.set_positions() {
-    result ^= dense.rotate_left(pos);  // cyclic rotation by pos
-}
-```
-
-**Mode B — Dense × Dense** (used in decrypt: `u · y` where `u` is an
-arbitrary ciphertext component and `y` is a sparse secret): same as Mode A
-but the sparse operand is the secret, so must be **constant-time** (the
-positions are secret). Use Mode A with the sparse operand but with branchless
-bit extraction.
-
-Optimization layers (all implemented — see Step 17 in the roadmap below):
-1. **L0 portable:** word-level baseline; retained for Mode A and as the
-   `#[cfg(test)]` oracle `mul_dense_ct_bitwise` for Mode B.
-2. **L1 Karatsuba (always on):** limb-level 3-multiply split, used by
-   `mul_dense_ct`. Mode A stays L0 (already linear in N).
-3. **L2 SIMD:** `pclmulqdq` carry-less word leaf via `std::arch::x86_64`, gated
-   `#[cfg(all(target_arch = "x86_64", target_feature = "pclmulqdq"))]` (Rust
-   feature string is `pclmulqdq`), portable `clmul64` fallback always present.
-   The only `unsafe` in the crate.
+## Key implementation decisions
 
 ### `poly/sampling.rs`
 
-`sample_fixed_weight<P>(xof: &mut Shake256, n: usize, weight: usize) -> Poly<P>`:
-rejection sampling that generates exactly `weight` distinct positions in `[0,n)`.
-The loop count is variable but positions are chosen uniformly.
+Two samplers:
+- `sample_fixed_weight` — rejection sampling, for **x, y** (keygen only; non-CT, reference-accepted).
+- `sample_fixed_weight_mod` — Barrett-reduction + backward swap, CT, for **r1, r2, e** (encrypt path).
 
-**CT requirement:** the number of rejection iterations must not branch on the
-*value* of sampled positions (only on the public condition `pos < n`). Use
-constant-time comparison for deduplication.
+### `poly/mul.rs`
 
-`hamming_weight(poly) -> usize`: popcount over `u64` limbs using
-`u64::count_ones()`.
-
-`sample_uniform<P>(xof: &mut Shake256) -> Poly<P>`: fills all `N` bits from
-the XOF — used for the public `h`.
+- **Mode A** (`mul_sparse_dense`): sparse × dense, O(ω·N/64), used for keygen/encrypt.
+- **Mode B** (`mul_dense_ct`): CT Karatsuba with `pclmulqdq` leaf (`clmul64`), used for decrypt (`u·y`). Portable fallback always present; SIMD enabled with `RUSTFLAGS="-C target-feature=+pclmulqdq"`.
 
 ### `gf.rs`
 
-GF(2^8) with primitive polynomial `p(x) = x⁸ + x⁴ + x³ + x² + 1` (hex `0x11D`).
-
-**Arithmetic is branch-free and table-free (Step 20a)** — required because the RS
-decoder feeds these functions the secret-derived decoded codeword:
-
-```rust
-// carry-less multiply (8 masked partial products) + branch-free reduce
-pub fn gf_mul(a: u8, b: u8) -> u8 { /* no `if a==0||b==0`, no table loads */ }
-// fixed addition chain a^254 = a^{-1}; gf_inv(0) == 0 (branchless sentinel)
-pub fn gf_inv(a: u8) -> u8 { /* gf_sq/gf_mul only */ }
-pub fn gf_div(a: u8, b: u8) -> u8 { gf_mul(a, gf_inv(b)) }
-```
-
-Helpers `gf_reduce` (clears bits 14..8 top-down mod `0x11D`) and `gf_sq`
-(bit-spread + reduce) are also branch-free. Zero is handled branchlessly
-everywhere (no value-dependent control flow, no secret-indexed loads).
-
-The precomputed tables remain but are **public-index only**:
-- `GF_EXP[512]`: antilog (doubled), indexed by public loop counters in
-  `reed_solomon.rs` (generator precompute, syndrome/Chien eval).
-- `GF_LOG[256]`: discrete log base α — no longer used by arithmetic; retained
-  under `#[allow(dead_code)]` for the additive FFT's public basis (Step 20c).
-
-All RS operations go through `gf.rs`.
-
-### `codes/reed_muller.rs`
-
-RM(1,7) base code: `[128, 8, 64]`. Encoding is a matrix-vector product over F2
-(or equivalently: the 8-bit input directly indexes the 128-bit row of the
-Hadamard matrix). Codeword is then duplicated `P::MULTIPLICITY` times.
-
-**Decoding (duplicated FHT):**
-1. Reshape the received block into `multiplicity` sub-blocks of 128 bits each.
-2. For each position `i`, compute `F(i) = Σ_j (-1)^{v_{j,i}}` (sum over duplicates).
-3. Apply the length-128 Walsh-Hadamard Transform (WHT) to the vector `F`.
-4. The decoded 8-bit symbol is `argmax |F̂|`. The sign of `F̂` at that position
-   determines the MSB (the all-ones correction vector).
-
-Tie-breaking rule: if two positions have equal `|F̂|`, take the one with the
-**smallest** value in the low 7 bits (per spec §3.4.3).
-
-WHT works on `i16` intermediate values. Range check: with multiplicity 5 and
-128 positions, values fit in `i16` without overflow.
-
-**CT requirement:** the argmax loop must not early-exit. Always scan all 128
-positions and update the running max with a branchless conditional move.
+Branch-free, table-free: `gf_mul` uses 8-step carry-less multiply + `gf_reduce`; `gf_inv` uses addition chain `a^254`. `GF_EXP` retained for public-index paths only. `GF_LOG` unused (kept for potential future FFT).
 
 ### `codes/reed_solomon.rs`
 
-Shortened RS over GF(2^8). Uses the precomputed generator polynomials from
-§3.4.2 of the spec — hardcode `G1`, `G2`, `G3` as `&[u8]` constants,
-do not derive them at runtime.
-
-**Encoding:** systematic; the message occupies the first `k` symbol positions
-and parity fills the remaining `n1 - k` positions. Standard polynomial
-long division over GF(2^8).
-
-**Decoding (constant-time, Steps 20a–c):**
-1. Compute `2δ` syndromes: `S_j = received(α^j)` for `j = 1..2δ` (always in full;
-   no "all-zero ⇒ no errors" fast path).
-2. Berlekamp-Massey → error locator polynomial `σ(x)` (masked/branchless, 20b).
-3. Build `Ω = S·σ mod x^{2δ}` and `σ'`; then a **branchless full scan** over every
-   position `i ∈ [0, n1)`: test `σ(α^{-i}) == 0` with `subtle::ct_eq`, compute the
-   Forney value `Ω(α^{-i})/σ'(α^{-i})`, and XOR a `conditional_select`-masked
-   correction into `corrected[i]` (store index = public counter). This replaces the
-   old Chien search + Forney (which used a conditional `push` and a secret-length
-   `Vec`).
-4. Validity (corrected has zero syndromes ∧ `deg ≤ δ` ∧ `#roots == deg`) is folded
-   to one bit; the lone `Some`/`None` branch.
-
-> **Perf TODO:** the full scan is `O(n1·δ)` GF-muls. A recursive additive FFT
-> (`codes/fft.rs`, evaluating σ at all 2⁸ points in `O(2⁸·8)`) is a deferred
-> speed-only optimization — see Step 20c. The current code is already constant-time.
-
-**CT requirement:** the decode path must run the same fixed sequence for every
-input — no syndrome fast path, no early exit, no secret-dependent branch or store
-address; only the final 1-bit Some/None may depend on the data.
-
-### `parsing.rs`
-
-Byte-level serialization matching the spec wire format exactly (KAT vectors
-validate this). Responsibilities:
-- Bit-pack/unpack `Poly<P>` to/from `[u8; ceil(N/8)]`
-- Pack public key: `seed_h (32 B) || s (ceil(n/8) B)`
-- Pack ciphertext: `u (ceil(n/8) B) || v (ceil(n1·n2/8) B) || salt (16 B)`
-- Compressed secret key: just `seed_KEM (32 B)`
-- Full secret key: `ekKEM || dkPKE || σ (32 B) || seedKEM (32 B)`
-
-Truncation: `v` covers exactly `n1 · n2` bits — where `n2` is the **duplicated**
-RM length (384 for HQC-128, 640 for HQC-192/256), i.e. the full concatenated
-RMRS codeword, *not* `n1 · 128`. This is embedded in the `n`-bit ring with the
-trailing `ℓ = n - n1·n2` bits zeroed; those ℓ ring bits are dropped on
-serialization. Cross-check: `CT_BYTES = ceil(n/8) + ceil(n1·n2/8) + 16` matches
-the spec's published `|cKEM|` (4433 / 8978 / 14421) and `params.rs`.
-
-### `hash.rs`
-
-Thin wrappers around `sha3` (RustCrypto). All four roles from the spec:
-
-```rust
-// G: derives (θ, K) for encrypt and the final shared key
-fn g(m: &[u8], ek_hash: &[u8; 32], salt: &[u8; 16]) -> (Theta, SharedKey)
-
-// H: SHA3-256 hash of the encapsulation key (used inside G)  
-fn h_ek(ek: &[u8]) -> [u8; 32]
-
-// J: implicit rejection key
-fn j(sigma: &[u8; 32], c: &[u8]) -> SharedKey
-
-// Seed expander / XOF for sampling
-fn xof(seed: &[u8]) -> impl XofReader   // SHAKE256
-```
-
-Do not use `SHA3-512` for key derivation — the spec 2025 uses `SHA3-256` for
-`H(ekKEM)` and `SHAKE256` for `G` and `J`.
-
-### `pke.rs`
-
-```
-HQC-PKE.Keygen(seed_dk, seed_ek):
-    h ← sample_uniform(SHAKE256(seed_ek))
-    (y, x) ← sample_fixed_weight × 2 (SHAKE256(seed_dk))
-    s = x + h·y
-    ek = (seed_ek, s),  dk = (seed_dk, ek)
-
-HQC-PKE.Encrypt(ek, m, θ):
-    (r2, e, r1) ← sample_fixed_weight × 3 (SHAKE256(θ))
-    u = r1 + h·r2
-    v = C.Encode(m) + s·r2 + e
-    return (u, v)
-
-HQC-PKE.Decrypt(dk, (u, v)):
-    tmp = v + u·y             // tmp = C.Encode(m) + x·r2 + r1·y + e
-    return C.Decode(tmp)      // returns None on decoding failure
-```
-
-Note on sampling order: the spec samples `(y, x)` (y first) from `seed_dk`
-and `(r2, e, r1)` (r2 first) from `θ`. Match this order exactly — KAT vectors
-will catch any swap.
-
-### `kem.rs`
-
-```
-HQC-KEM.Keygen():
-    seed_KEM ←$ random(32 B)
-    σ ←$ random(32 B)
-    (seed_dk, seed_ek) = SHA3-512(seed_KEM)
-    (ek, dk_PKE) = PKE.Keygen(seed_dk, seed_ek)
-    dk = (ek, dk_PKE, σ, seed_KEM)   // or compressed: (seed_KEM)
-
-HQC-KEM.Encaps(ek):
-    m ←$ random(k B)
-    salt ←$ random(16 B)
-    ek_hash = H(ek)
-    (K, θ) = G(m, ek_hash, salt)
-    c_PKE = PKE.Encrypt(ek, m, θ)
-    return (K, c_PKE || salt)
-
-HQC-KEM.Decaps(dk, c):
-    parse c = (c_PKE, salt)
-    m' = PKE.Decrypt(dk_PKE, c_PKE)    // may return None
-    ek_hash = H(ek)
-    (K', θ') = G(m' or zeros, ek_hash, salt)
-    c'_PKE = PKE.Encrypt(ek, m', θ')
-    K_bar = J(σ, c)
-    // Constant-time select: valid iff m' ≠ None AND c'_PKE == c_PKE
-    valid = (!m'_is_none) & ct_eq(c'_PKE, c_PKE)
-    return ct_select(valid, K', K_bar)
-```
-
-When `m' = None` (decoding failure), use an all-zero buffer for the `G`
-input — this ensures `G` is still called (constant-time) but `K_bar` will
-be returned via `ct_select`.
+CT decode pipeline: branchless syndromes → CT BM → `error_evaluator`/`formal_derivative` → full scan over all n1 positions (no Chien conditional push). Validity folded to one bit for the lone `Some`/`None` branch. All internal buffers `Zeroizing`.
 
 ---
 
 ## Constant-time requirements
 
-Every location below is a security boundary. Non-CT code here is a
-**vulnerability**, not a performance trade-off.
+| Location | What must be CT |
+|:---|:---|
+| `sampling.rs` `sample_fixed_weight_mod` | Fixed loops, `ct_eq` + `conditional_select` |
+| `mul.rs` Mode B | Branchless bit extraction from secret `y` |
+| `kem.rs::decaps` | `ct_eq(c'_PKE, c_PKE)`, `ct_select`, `Choice` for `m'_is_none` |
+| `reed_muller.rs` argmax | 128-scan, `conditional_select` (no early exit) |
+| `reed_solomon.rs` | Full-range scan, no syndrome fast path, no secret-indexed loads |
 
-| Location | What must be CT | Use |
-|:---|:---|:---|
-| `poly/sampling.rs` | Rejection loop: position deduplication check | `subtle::ConstantTimeEq` for u16/u32 comparisons |
-| `poly/mul.rs` Mode B | Bit extraction from secret sparse vector | Branchless `(word >> bit) & 1` over all positions |
-| `kem.rs::decaps` | Ciphertext comparison `c'_PKE == c_PKE` | `subtle::ConstantTimeEq` byte-by-byte |
-| `kem.rs::decaps` | Select `K'` vs `K_bar` | `subtle::ConditionallySelectable` |
-| `kem.rs::decaps` | `m' == None` check feeds into select | `subtle::Choice`, not a bool branch |
-| `codes/reed_muller.rs` | Argmax over 128 WHT outputs | Branchless running-max with `subtle::ConditionallySelectable` |
-| `codes/reed_solomon.rs` | Chien search over all `n1` candidates | No early exit; always iterate full range |
-
-Import `subtle::{ConstantTimeEq, ConditionallySelectable, Choice}`. Never use
-`==` on anything derived from secret key material or decrypted message bytes.
+`sample_fixed_weight` (x/y) is **non-CT** — keygen-only, reference-accepted.
 
 ---
 
 ## Zeroize discipline
 
-Secret material that must be zeroized on drop:
-- `Poly<P>` holding `x`, `y` (secret key components)
-- `[u8; 32]` seeds
-- `m` (recovered plaintext in Decaps)
-- `θ` (ephemeral randomness)
-
-Derive `ZeroizeOnDrop` from the `zeroize` crate on all types that hold the
-above. Use `Zeroizing<[u8; N]>` wrappers for intermediate byte buffers.
+- `Poly<P>`: `#[derive(Zeroize, ZeroizeOnDrop)]`
+- Seeds, σ, θ: `Zeroizing<[u8;N]>` wrappers
+- `m'` in decaps: `Zeroizing<Vec<u8>>`
+- RS/codec heap buffers: `Zeroizing` (syndromes, σ, Ω, σ', corrected, rs_cw, buf)
+- RM decoder: stack arrays, not heap; no zeroize needed
 
 ---
 
@@ -479,530 +157,68 @@ above. Use `Zeroizing<[u8; N]>` wrappers for intermediate byte buffers.
 
 ```toml
 [dependencies]
-sha3     = "0.10"        # SHAKE256, SHA3-256, SHA3-512
-subtle   = "2.5"         # constant-time primitives
-zeroize  = { version = "1.7", features = ["derive"] }
-rand_core = "0.6"        # RngCore for seeding (optional, behind feature)
+sha3      = "0.10"
+subtle    = "2.5"
+zeroize   = { version = "1.7", features = ["derive"] }
+rand_core = "0.6"
 
 [dev-dependencies]
-criterion = "0.5"        # benchmarks
-hex       = "0.4"        # KAT vector parsing
+criterion = "0.5"
+hex       = "0.4"
 ```
-
-No `unsafe` in any module except `poly/mul.rs` SIMD paths, gated behind
-`#[cfg(target_feature = "...")]` with a safe portable fallback always present.
-
-`std` target. A future `no_std + alloc` migration requires only renaming
-`std::vec::Vec` → `alloc::vec::Vec` — no architectural changes needed.
 
 ---
 
 ## Testing strategy
 
 ```bash
-cargo test                        # unit + integration tests (fast)
-cargo test --features kat         # KAT vectors — slow (~60s), ground truth
-cargo bench                       # criterion benchmarks
+cargo test                        # unit + integration (fast)
+cargo test --features kat         # KAT vectors — ground truth (~60s)
+cargo test --features ct-audit --test ct_timing -- --nocapture
+cargo bench
+cargo bench --bench bench -- "kem/decaps" --baseline <name>
 ```
 
-**KAT tests** (`tests/kat.rs`): parse official `.rsp` files from `pqc-hqc.org`
-and verify `Keygen`, `Encaps`, `Decaps` output byte-for-byte for all three
-parameter sets. These are the **only** correctness oracle that matters —
-if KAT passes, the implementation is correct.
-
-**Unit test coverage required:**
-- `gf_mul` / `gf_inv` identities and commutativity
-- `rm_encode` → inject up to `(192/2 - 1)` = 95 bit errors → `rm_decode` recovers
-- `rs_encode` → inject up to `δ` symbol errors → `rs_decode` recovers
-- `rs_decode` with `δ+1` errors → returns `None`
-- `poly_mul` commutativity: `a·b == b·a` for 100 random pairs
-- `pke_decrypt(pke_encrypt(m)) == m` for all three param sets
-- `kem_decaps(kem_encaps(ek)) == K` for all three param sets
-- Implicit rejection: flip one byte of a valid ciphertext → `decaps` returns
-  a different key, does not panic, does not return the original `K`
-- Decaps with zero-length or truncated ciphertext → no panic
+KAT tests (`tests/kat.rs`) are the **only** correctness oracle. If KAT passes for all three sets, the implementation is correct.
 
 ---
 
-## Implementation order
+## Implementation status
 
-Bottom-up order based on module dependencies. Work through these one at a time.
-
-| Step | File | Status | Depends on |
-|:----:|:-----|:------:|:-----------|
-| 1 | `src/params.rs` | ✅ done | — |
-| 2 | `src/gf.rs` | ✅ done | — |
-| 3 | `src/poly/mod.rs` | ✅ done | params |
-| 4 | `src/poly/sampling.rs` | ✅ done | params, poly/mod |
-| 5 | `src/poly/mul.rs` | ✅ done | params, poly/mod |
-| 6 | `src/codes/reed_muller.rs` | ✅ done | params, poly/mod |
-| 7 | `src/codes/reed_solomon.rs` | ✅ done | gf, params |
-| 8 | `src/codes/mod.rs` | ✅ done | reed_muller, reed_solomon |
-| 9 | `src/parsing.rs` | ✅ done | params, poly/mod |
-| 10 | `src/hash.rs` | ✅ done | (sha3 crate only) |
-| 11 | `src/pke.rs` | ✅ done | all of above |
-| 12 | `src/kem.rs` | ✅ done | pke, hash |
-| 13 | `src/lib.rs` | ✅ done | everything |
-
----
-
-## Remaining work — roadmap to a KAT-verified release
-
-The 13-step bottom-up build is functionally complete: all modules compile, and
-`PKE` / `KEM` round-trip (including implicit rejection) across all three
-parameter sets. What is left is the gap between *"works"* and the project's
-stated bar — **correct, constant-time, and verified byte-for-byte against the
-official KAT vectors**. Work these in order; each step is gated by the one
-before it.
-
-> Reminder: never run `cargo` here. Provide the command for the user to run.
-
-### Step 14 — `mod` (Barrett-reduction) sampler in `poly/sampling.rs` ✅ done
-
-**This was the critical path. Nothing downstream can match KAT until it lands.**
-
-The 2025 spec uses *two* different position samplers:
-
-- **`x`, `y`** (secret key) — rejection sampling. ✅ unchanged.
-- **`r1`, `r2`, `e`** (ephemeral) — a **Barrett-reduction (`mod`) sampler**: draw
-  a 32-bit little-endian word per index, map it into `[i, n)` via the spec's
-  fixed-point multiply-shift (`support[i] = i + ((rand · (n − i)) >> 32)`, see
-  reference `vect_set_random_fixed_weight`), then resolve duplicates with the
-  backward support-array swap procedure. ✅ implemented as
-  `sample_fixed_weight_mod`.
-
-What was done:
-1. Added `sample_fixed_weight_mod<P>(xof, weight) -> Poly<P>` in
-   `poly/sampling.rs`: Barrett reduction + backward duplicate resolution +
-   constant-time bit-setting (scan every word, OR in a masked bit).
-2. Kept the existing rejection sampler for `x`, `y`.
-3. Repointed `pke::encrypt` to call the `mod` sampler for `r2, e, r1`; removed
-   the `TODO(sampler)` notes in `pke.rs` and `hash.rs`.
-4. CT: reduction, dedup (`ConstantTimeEq`), and bit-setting
-   (`ConditionallySelectable`) all run over fixed public-length loops with no
-   data-dependent branch or store address.
-
-Unit tests added: exact-weight (implies distinctness) for all three sets;
-determinism; differs-from-rejection; and three hand-computed vectors pinning the
-formula and byte order — all-zero rand ⇒ positions `0..weight`, all-ones rand ⇒
-`{0..weight−2, N−1}` (exercises dedup), and a little-endian probe
-(`0x80000000` ⇒ position `⌊N/2⌋ = 8834`).
-
-> ⚠️ **Still unverified against the real oracle.** These tests pin the *intended*
-> algorithm and are internally consistent, but the Barrett constant details and
-> the x/y-vs-r1/r2/e split are only *proven* correct once Step 15 (KAT) passes.
-> The KAT run is the authority; if it fails, revisit the byte order, the
-> `(n − i)` vs `n` reduction, and whether `x, y` also need the `mod` sampler.
-
-### Step 15 — KAT harness in `tests/kat.rs` ✅ done
-
-The only correctness oracle that ultimately matters.
-
-Tasks:
-1. Add the `kat` feature to `Cargo.toml` (`cargo test --features kat`, per the
-   Testing strategy section).
-2. Vendor the official `.rsp` vectors (or a trimmed subset) from pqc-hqc.org for
-   HQC-128/192/256.
-3. Wire the NIST DRBG (AES-256-CTR `randombytes`) that the `.rsp` seeds assume,
-   then feed those seeds through `kem::keygen` / `encaps` / `decaps` and assert
-   `pk`, `sk`, `ct`, `ss` match **byte-for-byte**.
-4. Expect mismatches first to surface in Step 14; this harness is how you prove
-   it is fixed.
-
-This step is the definition of done for correctness. If KAT passes for all
-three sets, the implementation is correct.
-
-### Step 16 — `lib.rs` API polish (finish Step 13) ✅ done
-
-Promoted the crate root from "wired" to "public-facing":
-1. ✅ Crate-level `//!` docs with two keygen → encaps → decaps examples: a
-   `no_run` CSPRNG version and a runnable deterministic (seeded) doctest that
-   round-trips and asserts `k_send == k_recv`.
-2. ✅ Flat re-exports of the KEM entry points (`hqcr::keygen`,
-   `hqcr::keygen_from_seed`, `hqcr::encaps`, `hqcr::encaps_deterministic`,
-   `hqcr::decaps`) plus `hqcr::SharedKey`, `DecapsulationKey`, and `PublicKey`, so
-   callers need not reach into `hqcr::kem::`.
-3. ✅ Public surface decided: `params`, `pke`, and `kem` stay documented `pub`;
-   the internals `poly` / `codes` / `parsing` / `hash` remain `pub` (the
-   `tests/` harnesses use them) but are marked `#[doc(hidden)]` and excluded
-   from the stable API; `gf` stays `pub(crate)`.
-
-### Step 17 — `poly/mul.rs` optimization layers ✅ done
-
-Correctness is unaffected; the L0 bit-level Mode-B multiply is retained as a
-`#[cfg(test)]` oracle (`mul_dense_ct_bitwise`) and the new path is checked
-against it across random inputs for all three sets
-(`karatsuba_matches_bitwise_*`), alongside the existing naive / Mode-A-vs-B
-tests. Mode A (`mul_sparse_dense`) is unchanged (already linear in N).
-
-1. ✅ **L1 Karatsuba**, always compiled and always used by `mul_dense_ct`.
-   Implemented at the **limb level** (split the operand word arrays on a limb
-   boundary `h = ⌈n/2⌉`, so sub-operands stay word-aligned and recombination
-   needs no sub-word shifts): the 3-multiply identity
-   `A·B = z0 + (z1−z0−z2)·βʰ + z2·β²ʰ` over GF(2), recursing to a schoolbook
-   base case at `KARATSUBA_THRESHOLD = 16` limbs. Uses a single stack scratch
-   arena (`KARATSUBA_SCRATCH_WORDS = 4·MAX_N_WORDS + 256`; verified worst case
-   `S(901) = 3564 < 3860`). Writes the `2N`-bit product into the existing wide
-   accumulator, then `reduce_wide` folds mod `X^N − 1` (unchanged).
-2. ✅ **L2 SIMD** `pclmulqdq` as the leaf word multiply `clmul64`, gated by
-   `#[cfg(all(target_arch = "x86_64", target_feature = "pclmulqdq"))]`
-   (the Rust feature string is `pclmulqdq`, not `pclmul`). A branch-free
-   portable `clmul64` is the always-present fallback. The intrinsic block is
-   the **only `unsafe` in the crate**. Enable with
-   `RUSTFLAGS="-C target-feature=+pclmulqdq"` (or `-C target-cpu=native`).
-
-CT note: a full product visits every limb unconditionally and `clmul64` (both
-variants) is branch-free on operand values, so Mode B is constant-time w.r.t.
-both operands (in particular the secret `y`). A `debug_assert!` guards the
-"bits ≥ N are zero" invariant that the symmetric full-limb product relies on.
-
-### Step 18 — `benches/bench.rs` ✅ done
-
-Criterion benchmarks for `poly_mul` (both modes — `sparse_dense` Mode A and
-`dense_ct` Mode B), `keygen`, `encaps`, `decaps` across all three parameter
-sets. Two groups (`poly_mul`, `kem`), each parameterized by `hqc128/192/256`
-via `BenchmarkId`. Operands are derived from fixed seeds so runs are
-comparable. Use to verify Step 17 actually pays off and to catch regressions.
-Run: `cargo bench` (or `cargo bench --bench bench -- poly_mul`).
-
-### Step 19 — Release hardening (cross-cutting, last)
-
-Because the CT/zeroize machinery was written inline during Steps 1–18, the
-audits below are mostly a **verification-and-documentation** pass, not new
-construction. Decisions for this pass: **all three** verification layers
-(manual + empirical timing + IR/asm); gaps are **documented as known
-limitations**, not remediated (KAT-verified `src/` logic stays untouched);
-scope is the **two audits only** (items 3–4 below are deferred). Deliverables
-are *measurement instruments + docs* — no behavioural change to the library.
-
-#### 19a — Constant-time audit
-
-A CT audit hunts three leak classes against secret-derived data: (1)
-secret-dependent branches / early-exit, (2) secret-dependent memory access
-(table indices), (3) secret-dependent loop bounds. **"Secret" is transitive** —
-in `decaps`, `m'` is secret ⇒ decoded codeword is secret ⇒ the RS/RM decoder's
-inputs (and any GF table index inside it) are secret.
-
-Roadmap:
-
-1. **Audit log skeleton.** Create `docs/audit/constant-time.md` with columns:
-   *location · data classification · leak class · verdict · evidence
-   (file:line + which layer confirmed it)*.
-2. **Layer 1 — manual review.** Walk every row of the Constant-time
-   requirements table plus the inventory below; classify inputs, trace the
-   transitive secret chain, record verdict + `file:line`.
-3. **Layer 2 — empirical timing.** New `tests/ct_timing.rs` behind an opt-in
-   `ct-audit` feature; dudect-style Welch t-test on `kem::decaps` and
-   `mul_dense_ct` (fixed vs random secret, `_rdtsc` or `dudect-bencher`).
-   Record `|t|` (>10 ⇒ leak signal; ≈0 ⇒ no evidence). Note laptop/Windows
-   noise — evidence, never proof.
-4. **Layer 3 — IR/asm.** Emit asm for `mul_dense_ct`, `ct_select_key`, the RM
-   argmax, and the portable `clmul64`; confirm `subtle` selects became
-   `cmov`/masking, not `jcc` on a secret register. `cargo miri test` on the
-   `pclmulqdq` path. Repeat for portable and `+pclmulqdq` builds.
-
-Inventory (verdicts to confirm, not take on faith):
-
-| Location | State | Action |
-|:---|:---|:---|
-| `sampling.rs` `sample_fixed_weight_mod` (r1/r2/e) | CT (`ct_eq` + `conditional_select`, fixed loops) | verify ✅ |
-| `sampling.rs` `sample_fixed_weight` (x/y) | **non-CT** rejection (`:119,133`) | document (reference-accepted, keygen-only) |
-| `mul.rs` `mul_dense_ct` (secret `y`) | CT branchless Karatsuba + masking `clmul64` | verify ✅ + asm |
-| `mul.rs` `pclmulqdq` path | only `unsafe` in crate | miri + asm |
-| `kem.rs` `decaps` select/compare (`:220–233`, `ct_select_key`) | CT; only branch is **public** length check | verify ✅ |
-| `reed_muller.rs` argmax (`:196–206`) | CT 128-scan, `conditional_select` | verify ✅ |
-| `reed_solomon.rs` Chien/BM **+** `gf.rs` `gf_mul`/`gf_div`/`gf_inv` | **NOT CT** — zero-branch (`gf.rs:69`), secret-indexed `GF_LOG`/`GF_EXP`, conditional Chien `push` (`:190`), BM branches on syndromes | **document — headline finding** |
-| `parsing.rs` `unpack_ciphertext` length check | branch on **public** length | OK |
-
-The headline known-limitation: the **RS decoder + GF(2⁸) table lookups are not
-constant-time and process the secret-derived decoded codeword**. Document the
-transitive-secret reasoning, severity, and why it's deferred (a CT GF/decoder
-layer is a substantial rewrite that risks the KAT-verified paths). Context: the
-2025 spec's Barrett `mod` sampler (this crate's CT `sample_fixed_weight_mod`)
-exists *because of* the 2022 HQC/BIKE rejection-sampling timing attacks — the
-encryption side already absorbed that lesson; the decoder is the same class of
-issue on the decryption side.
-
-#### 19b — Zeroize audit
-
-A zeroize audit traces each secret's full lifetime (create → every copy/clone →
-drop) and confirms a wipe on every exit path including panics. Watch three
-defeaters: `Copy` types (bitwise copies escape `ZeroizeOnDrop`), `Vec`/`String`
-growth (realloc leaves stale buffers), and `mem::forget`/leaks (skip `Drop`).
-
-Roadmap:
-
-1. **Audit log.** Create `docs/audit/zeroize.md`.
-2. **Lifetime traces.** For each secret below, write create→copy→drop; confirm
-   no `Copy` on secret types, no growing secret `Vec`, no `mem::forget`.
-3. **Document low-risk gaps** with rationale.
-
-| Secret | State | Action |
-|:---|:---|:---|
-| `Poly<P>` (x, y, r1, r2, e) | `#[derive(Zeroize, ZeroizeOnDrop)]` (`poly/mod.rs:25`) | verify ✅ |
-| seeds `seed_dk`/`seed_kem`/`seed_pke`/`sigma` | `Zeroizing` / `DecryptionKey: ZeroizeOnDrop` | verify ✅ |
-| `m'` recovered plaintext | `Zeroizing<Vec<u8>>` (`kem.rs:221`) | verify ✅ |
-| `theta` | `Theta = Zeroizing<[u8;_]>` (`hash.rs:48`) | verify ✅ |
-| `salt`; `codes/mod.rs` `rs_cw`/`buf`; `poly_to_bytes` out | plain, dropped but not wiped | document (low-risk) |
-
-#### Deferred (not this pass)
-
-3. Run `cargo clippy` / `cargo fmt`; resolve warnings.
-4. Fill in crate metadata (README, keywords, categories) for a `crates.io`
-   publish if desired.
-
-#### Audit "done" criteria
-
-Every inventory row has a recorded verdict + evidence (with the confirming
-layer); `tests/ct_timing.rs` runs and its `|t|` for `decaps` / `mul_dense_ct`
-are logged (`cargo test --features ct-audit --test ct_timing -- --nocapture`);
-`cargo miri test` clean on the `pclmulqdq` path; asm spot-checks recorded; every
-secret has a lifetime trace; "Known limitations" written. No library
-behavioural change, so `cargo test` and the KAT suite must still pass unchanged.
-
-### Status summary
+All implementation steps complete. Current state:
 
 | Step | Item | Status |
 |:----:|:-----|:------:|
-| 14 | `mod` (Barrett) sampler for r1/r2/e | ✅ done (KAT-verified) |
+| 1–13 | Core modules (params → kem → lib) | ✅ done |
+| 14 | Barrett `mod` sampler for r1/r2/e | ✅ done (KAT-verified) |
 | 15 | KAT harness + vectors | ✅ done (byte-for-byte, all 3 sets) |
 | 16 | `lib.rs` API polish | ✅ done |
-| 17 | Karatsuba / SIMD `poly_mul` | ✅ done |
-| 18 | criterion benches | ✅ done |
-| 19a | Constant-time audit (manual + timing + asm/miri) | ✅ done (see `docs/SECURITY-AUDIT.md`) |
-| 19b | Zeroize audit | ✅ done (see `docs/SECURITY-AUDIT.md`) |
-| 19c/d | lint, crate metadata | ⬜ deferred |
-| 20 | Constant-time RS/GF decoder (remediate 19a headline + G3) | ✅ done — 20a–e (decoder `\|t\|` 622→0.82; G3 wiped; see `docs/SECURITY-AUDIT.md`) |
-| 20c-opt | Additive-FFT root finder (`codes/fft.rs`) — perf-only | ⬜ TODO (recover the ~3–4× decaps cost; decoder already CT) |
-| 20-asm | Layer-3 asm/miri pass over the Step-20 decoder | ⬜ follow-up (verified by source review + dudect + KAT so far) |
+| 17 | Karatsuba + `pclmulqdq` poly_mul | ✅ done |
+| 18 | Criterion benchmarks | ✅ done |
+| 19a/b | CT + zeroize audit | ✅ done (see `docs/SECURITY-AUDIT.md`) |
+| 20a–e | CT RS/GF decoder (decoder `\|t\|` 622→0.82; G3 wiped) | ✅ done |
+| 19c/d | Clippy/fmt, crate metadata | ⬜ deferred |
+| 20c-opt | Additive-FFT root finder (perf-only) | ⬜ **not needed** — see perf note |
+| 20-asm | Layer-3 asm/miri over Step-20 decoder | ⬜ follow-up |
 
----
+### Performance (measured)
 
-## Step 20 — Constant-time Reed-Solomon / GF(2⁸) decoder ✅ COMPLETE (20a–e)
+`pclmulqdq` restores decaps to near pre-CT levels. Without it the RS decoder dominates; with it `mul_dense_ct` dominates and the RS path is negligible. The decode_stages bench confirmed the FFT (20c-opt) would recover very little wall-clock time — **not worth implementing**.
 
-**Outcome:** the decryption-side timing oracle is closed — isolated decoder `|t|`
-622 → 0.82, full `decaps` 5.5 → 1.29 (all `< 5`); G3 codec buffers wiped; KAT
-byte-identical. Cost: `decaps` ≈3.2×–4.0× slower (corrected from the original
-estimate — see 20e). Deferred follow-ups: **20c-opt** (additive-FFT perf
-recovery) and **20-asm** (Layer-3 asm/miri). Full write-up in
-`docs/SECURITY-AUDIT.md`.
-
-Remediates the **headline CT limitation** from Step 19a (RS decoder + `gf.rs`
-table lookups leak on the secret-derived decoded codeword) **and** the matching
-zeroize gap **G3**. The official HQC reference (`c_implementations/reference-hqc-1`)
-is fully constant-time here and gives a KAT-blessed recipe to port — see the
-"Remediation recipe" section of `docs/SECURITY-AUDIT.md`. This is a **behavioural
-rewrite** of the decode path (the first since Step 19's verify-only scope), so the
-KAT suite is the gate: it must still pass byte-for-byte after every sub-step.
-
-> Reminder: never run `cargo` here. Provide the command for the user to run.
-> The KAT suite (`cargo test --features kat`) is the correctness oracle — run it
-> after **each** sub-step, not just at the end. Keep the old non-CT functions as
-> `#[cfg(test)]` oracles and cross-check the new CT versions against them on random
-> inputs (the same pattern Step 17 used for `mul_dense_ct_bitwise`).
-
-Work bottom-up (each sub-step gated by KAT + the previous oracle cross-check):
-
-### 20a — Branch-free GF(2⁸) arithmetic (`gf.rs`) ✅ done
-
-Replaced the table-indexed, zero-branching `gf_mul`/`gf_inv`/`gf_div` (the C2/C1
-leak source) with value-independent versions, mirroring the reference `gf.c`.
-
-What was done:
-1. ✅ `gf_mul`: branch-free **carry-less multiply** (8 masked-XOR partial products,
-   `deg ≤ 14` in a `u16`, **no** `if a==0||b==0`) + new branch-free `gf_reduce`
-   mod `0x11D` (clears bits 14..8 top-down, since `0x11D << (k−8)` has its leading
-   term exactly at bit `k`). Added a branch-free `gf_sq` (bit-spread + reduce).
-2. ✅ `gf_inv`: **fixed addition chain** `2,3,4,7,11,15,30,60,120,127,254`
-   (`a²⁵⁴ = a⁻¹`), using only `gf_sq`/`gf_mul`. `gf_inv(0) == 0` is a branchless
-   sentinel (0 has no inverse; every square/mul of 0 stays 0 — matches the
-   reference). `gf_div(a,b) = gf_mul(a, gf_inv(b))`, fully branch-free (drops the
-   old `if a==0` and the debug panic on 0).
-3. ✅ Tables reclassified: `GF_EXP` retained — used only on **public**-index paths
-   in `reed_solomon.rs` (generator precompute, syndrome eval, Chien, all indexed by
-   public loop counters). `GF_LOG` is no longer used by arithmetic; kept under
-   `#[allow(dead_code)]` for the additive FFT's public basis in 20c.
-
-Tests added (the Step-17 oracle pattern): the old table-based `gf_mul`/`gf_inv` are
-retained as `#[cfg(test)]` oracles, and exhaustive cross-checks assert the new
-branch-free versions agree on **all 256² multiply pairs** and **all 255 inverses**,
-plus `gf_sq == gf_mul(a,a)` over all elements and the `gf_inv(0)/gf_div(_,0)`
-sentinels.
-
-> CT note: this closes the **C2 secret-table-index** leak and the `gf_mul`/`gf_div`
-> **C1 zero-branch** leak. The decoder is **not yet fully CT** — Chien's conditional
-> `push` and the BM syndrome branches remain (20b/20c). Do **not** flip the
-> `docs/SECURITY-AUDIT.md` verdict rows until 20c lands.
-
-### 20b — Constant-time Berlekamp-Massey (`reed_solomon.rs`) ✅ done
-
-Rewrote `berlekamp_massey` to the masked in-place form of the reference
-`compute_elp` (kills the C1 discrepancy / register-length branches and the C3
-secret loop bound).
-
-What was done:
-1. ✅ Fixed `2δ` outer iterations; `sigma` and `X·σ_p` updated **in place** over
-   fixed-size buffers (`δ+1`), with a once-per-iteration `sigma_copy` save instead
-   of the old per-iteration `sigma.clone()`.
-2. ✅ Every branch (`if d == 0` / `else if 2l ≤ i` / `else`) replaced by a single
-   masked merge: `mask1 = (d ≠ 0)`, `mask2 = (deg_X·σ_p > deg_σ)`, and
-   `mask12 = black_box(mask1 & mask2)` ("register length grew"). The
-   `core::hint::black_box` barrier stops LLVM re-deriving a branch (the reference's
-   `volatile`). `pp`/`d_p`/`X·σ_p`/`deg_σ`/`deg_σ_p` are all XOR-mask updates.
-3. ✅ Both inner loops run to the **public** bound `min(μ+1, δ)` (sigma update and
-   discrepancy recompute), never to the secret register length. `gf_inv(d_p)` runs
-   unconditionally (20a's `gf_inv(0)=0` makes the zero case branch-free).
-
-Signature changed to `(Vec<u8>, usize)` = (full-length σ of `δ+1` with zero
-padding above the degree, deg σ). `rs_decode` now uses the returned degree as
-`num_errors`; `chien_search`/`forney` consume the full σ unchanged (trailing
-zeros don't affect evaluation).
-
-Tests added (oracle pattern): the old branch-based BM is retained as
-`#[cfg(test)] berlekamp_massey_ref`, and `ct_berlekamp_massey_matches_reference`
-asserts the new CT version returns the identical locator **and** degree for every
-correctable pattern `e ∈ [1, δ]` across all three codes (the locator is unique for
-≤ δ errors). All RS/PKE/KEM/KAT tests pass unchanged.
-
-> CT note: this closes the BM **C1** (discrepancy/length branches) and **C3**
-> (secret loop bound) leaks. The decoder is **still not fully CT** — `chien_search`'s
-> conditional `roots.push` (C1) and its secret-length `Vec` (G3), plus the
-> `rs_decode` `num_errors`/root-count branches, remain. Those fall to 20c (additive
-> FFT). Do **not** flip the `docs/SECURITY-AUDIT.md` verdict rows until 20c lands.
-
-### 20c — Constant-time root finding, replacing Chien search (`reed_solomon.rs`) ✅ done
-
-Removed the conditional-`push` Chien scan (C1), its secret-length `Vec` (G3), and
-**all** the remaining secret-dependent branches in `rs_decode` (the syndrome fast
-path and the `num_errors`/root-count early returns). The whole decode pipeline now
-runs the same fixed instruction/memory-access sequence for every input.
-
-> ⚠️ **Approach note — full evaluation now, additive FFT is a TODO.** The original
-> plan was to port the Gao–Mateer additive FFT (`fft.c`). I deliberately did **not**
-> do that yet: the FFT's only benefit is *speed*, and the decoder is a negligible
-> fraction of decaps (see the perf note in 20e). A constant-time **full evaluation**
-> (evaluate σ at α^{−i} for every position) removes the *identical* leaks with far
-> less correctness risk and is trivially verifiable against the existing decode
-> tests. No `src/codes/fft.rs` was created.
->
-> **TODO (deferred perf optimization, not a CT/correctness gap):** port the
-> recursive additive FFT into `src/codes/fft.rs` and swap it in behind the same
-> `rs_decode` interface (it evaluates σ at all 2⁸ points in `O(2⁸·8)` vs the current
-> `O(n1·δ)` full scan). Gate on KAT + cross-check against the current full-scan
-> decoder as the oracle. Purely a speed change; the current code is already
-> constant-time and correct.
-
-What was done:
-1. ✅ `syndromes` made branchless (OR-accumulate the "any non-zero" flag, no early
-   exit); `rs_decode` no longer takes the `if !has_error` fast path.
-2. ✅ Branchless root finding + correction inside `rs_decode`: scan **every**
-   position `i ∈ [0, n1)`, test `σ(α^{−i}).ct_eq(0)` (`subtle`), compute the Forney
-   value `Ω(α^{−i})/σ'(α^{−i})`, and XOR a `conditional_select`-masked correction
-   into `corrected[i]`. The store index `i` is the **public** loop counter (never an
-   error position); root count is accumulated with `Choice::unwrap_u8`. Replaces
-   `chien_search` + `forney` (both deleted from `src/`; a tiny naive Chien is kept
-   `#[cfg(test)]` for the position sanity check).
-3. ✅ `error_evaluator` (Ω = S·σ mod x^{2δ}) and `formal_derivative` (σ') helpers
-   built once over fixed-size buffers; the Forney math is identical to the old
-   `forney`, so values match at roots and are masked to 0 elsewhere.
-4. ✅ Validity folded to **one bit** — `corrected` has zero syndromes ∧ `deg ≤ δ` ∧
-   `#roots == deg` — computed branchlessly; the lone `Some`/`None` branch. This
-   reproduces the old decision exactly (each old reject path maps to a sub-condition).
-
-Interface unchanged (`rs_decode` still returns `Option<Vec<u8>>`), so `codes::decode`
-/ `pke::decrypt` / `kem::decaps` and their tests are untouched. The residual 1-bit
-Some/None is exactly what `kem::decaps` already consumes as `decode_ok`, folded with
-the CT re-encryption check (the real security gate — same design as the reference).
-
-Tests added: `ct_decode_corrects_random_patterns` (40 random ≤ δ patterns × all
-three codes) exercises the new root finder + inline Forney beyond the hand-picked
-patterns. All RS/codec/PKE/KEM/KAT tests pass unchanged.
-
-> CT note: with 20a+20b+20c the RS/GF decode path is now constant-time end-to-end —
-> the only remaining 20-series item before flipping the `docs/SECURITY-AUDIT.md`
-> verdict rows is the **20d** zeroize pass + the **20e** timing re-measurement.
-
-### 20d — Zeroize the codec buffers (closes G3) ✅ done
-
-Wrapped every secret-derived **heap buffer** on the encode/decode path in
-`Zeroizing`, so each wipes on drop along every exit path (including panics). All
-are fixed-size (no realloc), so defeater **D2** no longer applies to them.
-
-What was done:
-1. ✅ `reed_solomon.rs` `rs_decode`: `s` (syndromes), `σ`, `omega`, `sigma_prime`,
-   `corrected`, `s2` → `Zeroizing`.
-2. ✅ `reed_solomon.rs` `berlekamp_massey`: scratch `x_sigma_p`, `sigma_copy` →
-   `Zeroizing` (the returned `σ` is wrapped by `rs_decode`, same heap buffer).
-3. ✅ `reed_solomon.rs` `rs_encode`: the dividend `d` (holds the raw message during
-   division) → `Zeroizing`.
-4. ✅ `codes/mod.rs` `encode` (`rs_cw`, `buf`) and `decode` (`buf` = `poly_to_bytes`
-   output, `rs_cw`) → `Zeroizing`.
-
-Buffers that are *returned* (`syndromes`→`s`, BM→`σ`, `error_evaluator`→`omega`,
-`formal_derivative`→`sigma_prime`, `poly_to_bytes`→`buf`) are wrapped at the call
-site, so the same heap allocation is wiped on the caller's drop. No signatures
-changed — the wrappers deref-coerce to `&[u8]`/`&mut [u8]` exactly like the
-existing `m_bytes: Zeroizing<Vec<u8>>` pattern in `kem.rs` — so callers and all
-tests are untouched, and the change is logic-free (KAT byte-identical).
-
-Out of scope (left as-is): the RM decoder (`reed_muller.rs`) uses fixed **stack**
-arrays, not heap `Vec`s, so it is not a realloc-leak (D2) surface; the generator
-`g` in `rs_generator` is derived from public `delta` (not secret). The recovered
-**message** itself is still wrapped at the `kem::decaps` layer (`m_bytes`).
-
-> Note: the original 20d sketch mentioned FFT `w`/error arrays and a `z`
-> polynomial — those belong to the deferred additive-FFT path (20c-opt) that was
-> not built; the actual decoder's secret buffers (listed above) are what got
-> wiped.
-
-### 20e — Verify ✅ done
-
-Measured outcomes (all gates green):
-
-1. ✅ `cargo test --features kat` — byte-for-byte, all three sets.
-2. ✅ `cargo test` — oracle cross-checks (CT `gf`/BM vs retained old versions) +
-   `ct_decode_corrects_random_patterns`.
-3. ✅ `cargo test --features ct-audit --test ct_timing` (Hqc128, dudect Welch t):
-   - isolated `codes::decode` (the RS decoder): **`|t| = 0.82`** — down from
-     `~622` pre-20a; now indistinguishable from the CT canary.
-   - `mul_dense_ct` canary: `|t| = 1.10`.
-   - full `decaps`: **`|t| = 1.29`** — down from `~5.5`.
-   - All `< 5` ⇒ **no leak signal**. `docs/SECURITY-AUDIT.md` verdict rows flipped
-     ❌→✅ (RS decoder + GF), G3 → WIPED.
-4. ✅ `cargo bench --bench bench -- kem/decaps` — see corrected perf note below.
-
-**Performance note — CORRECTED (the earlier estimate was wrong).** The pre-Step-20
-estimate said "low single-digit % decaps slowdown" on the assumption the decoder
-was a tiny fraction of decaps. That was **measured to be wrong**: the old decoder
-was cheap *because* it used fast table lookups, so making GF branch-free
-(`gf_mul` ~10× slower, `gf_inv` addition-chain ~100× slower, called per-position in
-the full scan) turned the decoder into a *dominant* part of the RS path. Criterion
-shows `decaps` **≈3.2×–4.0× slower**:
-
-| set | before | after | change |
+| set | portable | +pclmulqdq | pre-CT master |
 |---|---|---|---|
-| hqc128 | ~0.78 ms | 2.54 ms | +225 % |
-| hqc192 | ~2.1 ms | 7.23 ms | +241 % |
-| hqc256 | ~4.4 ms | 17.29 ms | +295 % |
+| hqc128 | ~2.46 ms | ~0.87 ms | ~0.78 ms |
+| hqc192 | ~7.06 ms | ~2.22 ms | ~2.1 ms |
+| hqc256 | ~17.07 ms | ~4.73 ms | ~4.4 ms |
 
-Keygen and encaps are unaffected (they never decode). This is the price of closing
-the decryption-side timing oracle. Most of it is recoverable by the deferred
-**20c-opt** (additive-FFT root finder + batched inversions, replacing the
-`O(n1·δ)` full scan and the per-position `gf_inv`) — a pure speed change; the
-current code is already constant-time and KAT-correct. The decaps timing dilution
-note (`|t|` 622→5.5 pre-fix) reflected the *old* fast decoder and does not predict
-the post-fix cycle split.
+Keygen and encaps are unaffected (they never decode).
 
 ---
 
 ## Reference implementations
 
-- **Official C reference + AVX2:** https://pqc-hqc.org (source tarball)  
-  The AVX2 `poly_mul` shows the intended CLMUL/Karatsuba strategy.
-- **pqcrypto-hqc:** Rust FFI bindings to the C reference (not pure Rust)
+- **Official C reference + AVX2:** https://pqc-hqc.org (source tarball)
+- **pqcrypto-hqc:** Rust FFI bindings to C reference (not pure Rust)
 - **RustCrypto/KEMs `hqc`:** placeholder `0.0.0`, not implemented
 
-When spec text is ambiguous, the C reference is the tie-breaker (after the
-PDF spec). Sampling order and bit-packing conventions are easiest to verify
-by running both implementations on the same seed and comparing intermediate
-vectors.
+When spec text is ambiguous, the C reference is the tie-breaker.
