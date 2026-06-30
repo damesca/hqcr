@@ -1,0 +1,59 @@
+CC:=gcc
+
+CFLAGS:=-O3 -std=c99 -funroll-all-loops -flto -pedantic -Wall -Wextra
+
+SHA3_SRC:=lib/fips202/fips202.c
+SHA3_INCLUDE:=-I lib/fips202
+
+SRC:=src/
+INCLUDE:=-I src
+LIB:=$(SHA3_INCLUDE)
+
+MAIN_HQC:=src/main_hqc.c
+MAIN_KAT:=src/main_kat.c
+
+HQC_OBJS:=vector.o reed_muller.o reed_solomon.o fft.o gf.o gf2x.o code.o parsing.o hqc.o kem.o symmetric.o crypto_memset.o
+HQC_OBJS_VERBOSE:=vector.o reed_muller.o reed_solomon-verbose.o fft.o gf.o gf2x.o code-verbose.o parsing.o hqc-verbose.o kem-verbose.o symmetric.o crypto_memset.o
+LIB_OBJS:= fips202.o
+
+BIN:=bin
+BUILD:=bin/build
+
+folders:
+	@/bin/echo -e "\n### Creating folders"
+	mkdir -p $(BUILD)
+
+fips202.o: | folders
+	@/bin/echo -e "\n### Compiling fips202"
+	$(CC) $(CFLAGS) -c $(SHA3_SRC) $(SHA3_INCLUDE) -o $(BUILD)/$@
+
+%.o: $(SRC)/%.c | folders
+	@/bin/echo -e "\n### Compiling $@"
+	$(CC) $(CFLAGS) -c $< $(INCLUDE) $(LIB) -o $(BUILD)/$@
+
+%-verbose.o: $(SRC)/%.c | folders
+	@/bin/echo -e "\n### Compiling $@ (verbose mode)"
+	$(CC) $(CFLAGS) -c $< $(INCLUDE) $(LIB) -D VERBOSE -o $(BUILD)/$@
+
+hqc-5: $(HQC_OBJS) $(LIB_OBJS) | folders
+	@/bin/echo -e "\n### Compiling hqc-5"
+	$(CC) $(CFLAGS) $(MAIN_HQC) $(addprefix $(BUILD)/, $^) $(INCLUDE) $(LIB) -o $(BIN)/$@
+
+hqc-5-kat: $(HQC_OBJS) $(LIB_OBJS) | folders
+	@/bin/echo -e "\n### Compiling hqc-5 KAT"
+	$(CC) $(CFLAGS) $(MAIN_KAT) $(addprefix $(BUILD)/, $^) $(INCLUDE) $(LIB) -o $(BIN)/$@
+
+hqc-5-verbose: $(HQC_OBJS_VERBOSE) $(LIB_OBJS) | folders
+	@/bin/echo -e "\n### Compiling hqc-5 (verbose mode)"
+	$(CC) $(CFLAGS) $(MAIN_HQC) $(addprefix $(BUILD)/, $^) $(INCLUDE) $(LIB) -D VERBOSE -o $(BIN)/$@
+
+MAIN_SPEED:=../main_speed.c
+
+hqc-5-speed: $(HQC_OBJS) $(LIB_OBJS) | folders
+	@/bin/echo -e "\n### Compiling hqc-5-speed"
+	$(CC) $(CFLAGS) $(MAIN_SPEED) $(addprefix $(BUILD)/, $^) $(INCLUDE) $(LIB) -o $(BIN)/$@
+
+clean:
+	rm -f PQCkemKAT_*
+	rm -f vgcore.*
+	rm -rf ./bin
